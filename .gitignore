@@ -218,3 +218,9 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+.Rproj.user
+
+# AAMAS 2027 figures/plots/results directory, and the scripts' default
+# top-level output dir -- too large to push to git; only the code ships.
+AAMAS 2027/
+/results/
