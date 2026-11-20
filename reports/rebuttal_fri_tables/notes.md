@@ -1,0 +1,2 @@
+- 2000 run_ids were run twice (orig and A_replay_scope); 0 differ in any logged value.
+- 13000 unique runs loaded; 0 have a NaN in return_pre/return_total/auc/kld_final; non-finite kld_final: 0.

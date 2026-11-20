@@ -75,17 +75,23 @@ Note on the reviewer's point: with a strict `>`, a self-comparison (Δ = 0) woul
 
 ## 5. Reuse acceptances per condition
 
-From the stored paper results (`AAMAS 2027/results/main_raw.csv`, `method == hh_replay`, 200 seeds each). These counts are identical for HH-A, since the cascade does not depend on ego actions.
+The table covers 200 seeds per condition, HH-R. The cascade never sees ego actions, so the counts are identical for HH-A and for every replay/ε variant.
+- **"logged"** columns: the Task L rerun at default flags (`results/rebuttal_fri/orig`).
+- **"stored"** columns: the paper's `AAMAS 2027/results/main_raw.csv` (`economy_*_accepted`).
 
-| Condition | reuse accepted (total) | per episode | episodes with ≥1 reuse | merge accepted / ep | construct accepted / ep | detections / ep |
+They agree exactly, and per-run regression is bitwise for all 200 seeds. "Merge" is the code's `Regime.REVISE`.
+
+| condition | reuse (logged) | reuse (stored) | merge (logged / stored) | construct (logged / stored) | reuse accepts whose binding comparison was the incumbent / another library model | median Δloglik of accepted reuse |
 |---|---|---|---|---|---|---|
-| stationary | 92 | 0.46 | 54 / 200 | 0.745 | 0.075 | 2.19 |
-| within_library_switch | 166 | 0.83 | 80 / 200 | 2.20 | 1.03 | 9.16 |
-| outside_library_switch_m1 | 340 | 1.70 | 139 / 200 | (see summary) | | 10.16 |
-| outside_library_switch_m2 | 322 | 1.61 | 151 / 200 | | | 10.37 |
-| recurring | 583 | 2.92 | 189 / 200 | | | 15.24 |
+| stationary | 92 | 92 | 149 / 149 | 15 / 15 | 88 / 4 | 2.20 |
+| within_library_switch | 166 | 166 | 440 / 440 | 206 / 206 | 150 / 16 | 2.20 |
+| outside_library_switch_m1 | 340 | 340 | 419 / 419 | 84 / 84 | 238 / 102 | 2.13 |
+| outside_library_switch_m2 | 322 | 322 | 470 / 470 | 131 / 131 | 248 / 74 | 2.20 |
+| recurring | 583 | 583 | 585 / 585 | 167 / 167 | 364 / 219 | 1.89 |
 
-**Cross-check against the logged rerun (Task L, default flags, all 200 seeds):** see `reports/FRIDAY_SUMMARY.md` §2. The logged rerun reproduces these counts exactly. Each accepted reuse is also logged with its binding comparison model and Δ in `results/rebuttal_fri/main/events.csv`.
+Of all 1503 accepted reuses, 824 retrieve an L₀ model and 679 retrieve a learned (previously accepted) model.
+
+"Binding comparison" is the model in the comparison set with the smallest Δ, i.e. the one that decided acceptance. In 16–219 accepted reuses per condition this is **another library model**, not the incumbent. Each accepted reuse is logged with its Δ, binding model and window in `results/rebuttal_fri/orig/events.csv` (`event == "accept"`, `op == "reuse"`).
 
 ## 6. Conclusion
 
