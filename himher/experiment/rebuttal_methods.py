@@ -14,6 +14,8 @@ from typing import Any, Callable
 import numpy as np
 
 from himher.baselines.continuous_bayes import ContinuousBayesAgent
+from himher.baselines.discounted_bayes import DiscountedBayesAgent
+from himher.baselines.windowed_bayes import WindowedBayesAgent
 from himher.baselines.fixed_library_bayes import FixedLibraryBayesAgent
 from himher.baselines.hh_agent import HHAgent
 from himher.baselines.oracle_bayes import make_oracle_bayes_agent
@@ -75,6 +77,16 @@ register("OB", "OB", "default", lambda seed, spec: make_oracle_bayes_agent(
 register("CB", "CB", "default", lambda seed, spec: ContinuousBayesAgent(alpha=ALPHA))
 
 ORIGINAL_METHODS = ("HH-R", "HH-A", "FB", "OB", "CB")
+
+# Task B: windowed / discounted Beta-Bayes (same prior and decision rule as CB).
+WB_WINDOW = 20  # brief D1: identical to H+H's k
+DB_GAMMAS = (0.90, 0.95, 0.98)  # brief D2: report all three
+register("WB-k20", "WB-k20", "default",
+         lambda seed, spec: WindowedBayesAgent(alpha=ALPHA, window=WB_WINDOW))
+for _g in DB_GAMMAS:
+    register(f"DB-{_g:.2f}", f"DB-{_g:.2f}", "default",
+             lambda seed, spec, g=_g: DiscountedBayesAgent(alpha=ALPHA, gamma=g))
+B_METHODS = ("WB-k20",) + tuple(f"DB-{g:.2f}" for g in DB_GAMMAS)
 
 # Mapping to the method names used in the stored paper results.
 PAPER_NAME = {"HH-R": "hh_replay", "HH-A": "hh_ablation", "FB": "fixed_bayes",
