@@ -88,6 +88,12 @@ for _g in DB_GAMMAS:
              lambda seed, spec, g=_g: DiscountedBayesAgent(alpha=ALPHA, gamma=g))
 B_METHODS = ("WB-k20",) + tuple(f"DB-{g:.2f}" for g in DB_GAMMAS)
 
+# Task A: replay-scope ablation (HH-R only; "full" is the registered "HH-R").
+for _scope in ("him_window", "post_detection"):
+    register(f"HH-R@{_scope}", "HH-R", _scope,
+             lambda seed, spec, sc=_scope: make_hh_agent(seed, replay=True, replay_scope=sc))
+A_METHODS = ("HH-R", "HH-R@him_window", "HH-R@post_detection", "HH-A")
+
 # Mapping to the method names used in the stored paper results.
 PAPER_NAME = {"HH-R": "hh_replay", "HH-A": "hh_ablation", "FB": "fixed_bayes",
               "OB": "oracle_bayes", "CB": "continuous_bayes"}
