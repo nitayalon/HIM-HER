@@ -39,6 +39,10 @@ class TabularQPolicy:
         # against a quickly-discarded wrong one.
         self._update_counts: dict[BernoulliHandModel, int] = defaultdict(int)
 
+    @property
+    def epsilon(self) -> float:
+        return self._epsilon
+
     def q_value(self, context: Context, model: BernoulliHandModel, action: Hand) -> float:
         return self._q[(context, model, action)]
 
