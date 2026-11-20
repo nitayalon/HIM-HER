@@ -43,6 +43,16 @@ class TabularQPolicy:
     def epsilon(self) -> float:
         return self._epsilon
 
+    @epsilon.setter
+    def epsilon(self, value: float) -> None:
+        # Used only by HHAgent's non-default eps_schedule="decay_reset".
+        # (Changing epsilon changes how often act() draws its extra
+        # rng.integers call, i.e. the ego RNG stream; the environment's
+        # RNG is separate, so contexts/counterpart draws stay paired.)
+        if not 0.0 <= value <= 1.0:
+            raise ValueError("epsilon must be in [0, 1]")
+        self._epsilon = value
+
     def q_value(self, context: Context, model: BernoulliHandModel, action: Hand) -> float:
         return self._q[(context, model, action)]
 

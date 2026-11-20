@@ -23,6 +23,12 @@ from himher.domains.handoff.policy import TabularQPolicy, Transition
 
 
 REPLAY_SCOPES = ("full", "him_window", "post_detection")
+EPS_SCHEDULES = ("constant", "decay_reset")
+
+
+def decay_reset_epsilon(t: int, t_reset: int, eps0: float, eps_min: float, half_life: float) -> float:
+    """eps_t = max(eps_min, eps0 * 2^(-(t - t_reset) / h)) (rebuttal D3)."""
+    return max(eps_min, eps0 * 2.0 ** (-(t - t_reset) / half_life))
 
 
 class HHAgent:
@@ -33,6 +39,10 @@ class HHAgent:
         rng: np.random.Generator,
         replay: bool = True,
         replay_scope: str = "full",
+        eps_schedule: str = "constant",
+        eps0: float = 0.15,
+        eps_min: float = 0.02,
+        eps_half_life: float = 50.0,
     ) -> None:
         """``replay`` toggles Section 5.2's ablation: when False, the
         buffer of pre-acceptance transitions is discarded on revision
@@ -49,7 +59,19 @@ class HHAgent:
             of the detection run that ended in this acceptance (the earliest
             round of the uninterrupted streak of detected rounds since the
             previous acceptance), limited to what the buffer still holds.
+
+        ``eps_schedule`` (rebuttal Task D):
+          - "constant" (default): the policy's own fixed epsilon. Unchanged.
+          - "decay_reset": before acting in round t, set the policy's
+            epsilon to max(eps_min, eps0 * 2^(-(t - t_reset)/eps_half_life)),
+            where t_reset is 0 at episode start and is set to the round of
+            every detection (mismatch flagged), whether or not a revision
+            is then accepted. A detection in round t is only known after
+            round t's action, so the first action using the reset is round
+            t+1 (epsilon = eps0 * 2^(-1/h)).
         """
+        if eps_schedule not in EPS_SCHEDULES:
+            raise ValueError(f"eps_schedule must be one of {EPS_SCHEDULES}")
         if replay_scope not in REPLAY_SCOPES:
             raise ValueError(f"replay_scope must be one of {REPLAY_SCOPES}")
         self._cascade = cascade
@@ -69,6 +91,11 @@ class HHAgent:
         self.replay_log: list[tuple[int, int, int, int]] = []
         self.last_step_log: CascadeStepLog | None = None
         self.step_logs: list[CascadeStepLog] = []
+        self._eps_schedule = eps_schedule
+        self._eps_params = (eps0, eps_min, eps_half_life)
+        self._t_reset = 0
+        self.eps_reset_times: list[int] = [0] if eps_schedule == "decay_reset" else []
+        self.last_epsilon: float | None = None
 
     @property
     def cascade(self) -> HHCascade:
@@ -90,7 +117,14 @@ class HHAgent:
     def replay_scope(self) -> str:
         return self._replay_scope
 
+    @property
+    def eps_schedule(self) -> str:
+        return self._eps_schedule
+
     def act(self, context: Context) -> Hand:
+        if self._eps_schedule == "decay_reset":
+            self._policy.epsilon = decay_reset_epsilon(self._t, self._t_reset, *self._eps_params)
+        self.last_epsilon = self._policy.epsilon
         return self._policy.act(context, self._cascade.incumbent, self._rng)
 
     def update(
@@ -111,6 +145,9 @@ class HHAgent:
         if step_log.detected:
             if self._detect_run_start is None:
                 self._detect_run_start = t
+            if self._eps_schedule == "decay_reset":
+                self._t_reset = t
+                self.eps_reset_times.append(t)
         else:
             self._detect_run_start = None
 

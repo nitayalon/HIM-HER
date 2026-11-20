@@ -94,6 +94,17 @@ for _scope in ("him_window", "post_detection"):
              lambda seed, spec, sc=_scope: make_hh_agent(seed, replay=True, replay_scope=sc))
 A_METHODS = ("HH-R", "HH-R@him_window", "HH-R@post_detection", "HH-A")
 
+# Task D: epsilon schedule (brief D3: eps0 = 0.15, eps_min = 0.02, h = 50).
+EPS0, EPS_MIN, EPS_HALF_LIFE = 0.15, 0.02, 50.0
+register("HH-R@decay_reset", "HH-R", "decay_reset",
+         lambda seed, spec: make_hh_agent(seed, replay=True, eps_schedule="decay_reset", eps0=EPS0,
+                                          eps_min=EPS_MIN, eps_half_life=EPS_HALF_LIFE))
+register("HH-R@him_window+decay_reset", "HH-R", "him_window+decay_reset",
+         lambda seed, spec: make_hh_agent(seed, replay=True, replay_scope="him_window",
+                                          eps_schedule="decay_reset", eps0=EPS0, eps_min=EPS_MIN,
+                                          eps_half_life=EPS_HALF_LIFE))
+D_METHODS = ("HH-R@decay_reset", "HH-R@him_window+decay_reset")
+
 # Mapping to the method names used in the stored paper results.
 PAPER_NAME = {"HH-R": "hh_replay", "HH-A": "hh_ablation", "FB": "fixed_bayes",
               "OB": "oracle_bayes", "CB": "continuous_bayes"}
