@@ -2,7 +2,7 @@
 directory (original methods, log_level=full) against the stored paper
 results in "AAMAS 2027/results" -- per run and, where stored, per step.
 
-Usage: python scripts/rebuttal_regression_check.py results/rebuttal_fri/regression
+Usage: python scripts/rebuttal_regression_check.py "AAMAS 2027/results/rebuttal_fri/regression"
 Exit code 1 on any mismatch.
 """
 

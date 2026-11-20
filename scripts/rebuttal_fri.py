@@ -1,11 +1,11 @@
 """Rebuttal (Fri 11/20) experiment runner: runs registered methods x
 conditions x seeds through himher.experiment.instrumentation and writes
 
-    results/rebuttal_fri/<experiment>/summary.csv   one row per run
-    results/rebuttal_fri/<experiment>/events.csv    log_level >= events
-    results/rebuttal_fri/<experiment>/per_step.npz  log_level == full
-    results/rebuttal_fri/<experiment>/timing.csv    per method
-    results/rebuttal_fri/<experiment>/meta.json     command, hardware, versions
+    AAMAS 2027/results/rebuttal_fri/<experiment>/summary.csv   one row per run
+    AAMAS 2027/results/rebuttal_fri/<experiment>/events.csv    log_level >= events
+    AAMAS 2027/results/rebuttal_fri/<experiment>/per_step.npz  log_level == full
+    AAMAS 2027/results/rebuttal_fri/<experiment>/timing.csv    per method
+    AAMAS 2027/results/rebuttal_fri/<experiment>/meta.json     command, hardware, versions
 
 Seeds are 0..N-1 (the paper's seed list is range(200) for every
 condition x method), so every method sees identical contexts, counterpart
@@ -37,7 +37,7 @@ sys.path.insert(0, str(ROOT))
 from himher.experiment import instrumentation as inst  # noqa: E402
 from himher.experiment.rebuttal_methods import METHODS  # noqa: E402
 
-OUT_ROOT = ROOT / "results" / "rebuttal_fri"
+OUT_ROOT = ROOT / "AAMAS 2027" / "results" / "rebuttal_fri"
 
 
 def _init_worker() -> None:
@@ -137,7 +137,7 @@ def run_experiment(experiment: str, method_keys: list[str], conditions: list[str
             "workers": workers, "elapsed_s": elapsed, "git_head": _git_head(),
             "argv": sys.argv, "hardware": _hardware()}
     (out / "meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
-    print(f"[{experiment}] {len(tasks)} runs in {elapsed:.1f}s -> results/rebuttal_fri/{experiment}", flush=True)
+    print(f"[{experiment}] {len(tasks)} runs in {elapsed:.1f}s -> AAMAS 2027/results/rebuttal_fri/{experiment}", flush=True)
     return out
 
 

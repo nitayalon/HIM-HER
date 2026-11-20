@@ -1,7 +1,7 @@
-"""Analysis for the Friday rebuttal runs. Reads results/rebuttal_fri/*/ and
-writes CSV tables to reports/rebuttal_fri_tables/ plus markdown fragments
-(printed / written to reports/rebuttal_fri_tables/*.md) that
-reports/FRIDAY_SUMMARY.md is assembled from.
+"""Analysis for the Friday rebuttal runs. Reads AAMAS 2027/results/rebuttal_fri/*/ and
+writes CSV tables to AAMAS 2027/reports/rebuttal_fri_tables/ plus markdown fragments
+(printed / written to AAMAS 2027/reports/rebuttal_fri_tables/*.md) that
+AAMAS 2027/reports/FRIDAY_SUMMARY.md is assembled from.
 
 Statistics: mean and 95% percentile-bootstrap CI over seeds (10,000
 resamples, fixed resampling seed 20261120). Paired differences resample
@@ -21,8 +21,9 @@ import numpy as np
 import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
-RUNS = ROOT / "results" / "rebuttal_fri"
-OUT = ROOT / "reports" / "rebuttal_fri_tables"
+RUNS = ROOT / "AAMAS 2027" / "results" / "rebuttal_fri"
+REPORTS = ROOT / "AAMAS 2027" / "reports"
+OUT = REPORTS / "rebuttal_fri_tables"
 EXPERIMENTS = ["orig", "B_baselines", "A_replay_scope", "D_eps_schedule"]
 N_BOOT = 10_000
 BOOT_SEED = 20261120
@@ -394,14 +395,14 @@ def main() -> None:
     print("\n".join(notes))
     print(f"wrote tables to {OUT.relative_to(ROOT)}")
 
-    # Assemble reports/FRIDAY_SUMMARY.md from the hand-written template.
-    tpl = (ROOT / "reports" / "FRIDAY_SUMMARY.template.md").read_text(encoding="utf-8")
+    # Assemble AAMAS 2027/reports/FRIDAY_SUMMARY.md from the hand-written template.
+    tpl = (REPORTS / "FRIDAY_SUMMARY.template.md").read_text(encoding="utf-8")
     for k in ["reuse", "main", "paired", "diag", "m1", "m2", "compute"]:
         tpl = tpl.replace("{{" + k + "}}", (OUT / f"{k}.md").read_text(encoding="utf-8").strip())
     tpl = tpl.replace("{{notes}}", " ".join(notes))
     assert "{{" not in tpl
-    (ROOT / "reports" / "FRIDAY_SUMMARY.md").write_text(tpl, encoding="utf-8")
-    print("wrote reports/FRIDAY_SUMMARY.md")
+    (REPORTS / "FRIDAY_SUMMARY.md").write_text(tpl, encoding="utf-8")
+    print("wrote AAMAS 2027/reports/FRIDAY_SUMMARY.md")
 
 
 if __name__ == "__main__":
