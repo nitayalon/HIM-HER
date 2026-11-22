@@ -130,6 +130,20 @@ def make_bpr_agent(seed: int, rho: float | None = None) -> "BPRPlusAgent":
 
 register("BPR+", "BPR+", "default", lambda seed, spec: make_bpr_agent(seed))
 
+# BOCPD (author's bocd_bayes.py, unchanged): Adams & MacKay recursion over
+# the L0 hypotheses, no run-length pruning. hazard = 0.01 is an untuned
+# generic value chosen by the author for the cost study (11/22); it was
+# not calibrated (it never ran in the Friday/Saturday results).
+BOCPD_HAZARD = 0.01
+
+
+def make_bocpd_agent(seed: int, hypotheses=None) -> Any:
+    from himher.baselines.bocd_bayes import BOCDBayesAgent
+    return BOCDBayesAgent(cond.LIBRARY_0 if hypotheses is None else hypotheses, hazard=BOCPD_HAZARD)
+
+
+register("BOCPD", "BOCPD", "default", lambda seed, spec: make_bocpd_agent(seed))
+
 # Mapping to the method names used in the stored paper results.
 PAPER_NAME = {"HH-R": "hh_replay", "HH-A": "hh_ablation", "FB": "fixed_bayes",
               "OB": "oracle_bayes", "CB": "continuous_bayes"}
