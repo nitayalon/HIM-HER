@@ -3,7 +3,8 @@ post-switch phases, with paired t-tests and Holm-Bonferroni FWER control.
 
 Table 1 (realised reward): per-seed cumulative reward and average reward
 per round in each phase, from the stored 200-seed summaries
-(orig/summary.csv for HH-R/HH-A, BPR_baseline/summary.csv for BPR+).
+(orig/summary.csv for HH-R/HH-A, BPR_mdp/summary.csv for BPR+ = the MDP
+implementation; the first, Bernoulli BPR+ results are kept in BPR_baseline/).
   whole = rounds 0..T-1, pre = rounds < first switch, post = rounds >=
   first switch (Recurring: first switch at 75, so "post" spans the later
   switches too). Stationary has no switch: whole only.
@@ -71,7 +72,7 @@ def all_phases(cond: str) -> list[str]:
 
 def realised() -> pd.DataFrame:
     s = pd.concat([pd.read_csv(RUNS / "orig" / "summary.csv"),
-                   pd.read_csv(RUNS / "BPR_baseline" / "summary.csv")])
+                   pd.read_csv(RUNS / "BPR_mdp" / "summary.csv")])
     s = s[s.method.isin(METHODS) & (s.variant == "default")]
     rows = []
     for _, r in s.iterrows():

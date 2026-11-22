@@ -42,6 +42,8 @@ import time
 from typing import Any, Callable
 
 from himher.baselines import bpr_plus as _bpr
+from himher.baselines import bpr_plus_mdp as _bprm
+from himher.baselines.bpr_plus_mdp import BPRPlusMDPAgent
 from himher.baselines.bocd_bayes import BOCDBayesAgent
 from himher.baselines.bpr_plus import BPRPlusAgent
 from himher.baselines.continuous_bayes import ContinuousBayesAgent
@@ -197,6 +199,19 @@ def _analytic(cat: str, orig: Callable) -> Callable:
     return charged
 
 
+def _charge(orig: Callable, n_of: Callable[[tuple, Any], int]) -> Callable:
+    """Analytic count for vectorised/closed-form evaluations: after the call,
+    charge n_of(args, result) evaluations to the current category."""
+    def charged(*args: Any, **kwargs: Any) -> Any:
+        c = ACTIVE
+        out = orig(*args, **kwargs)
+        if c is not None and not _depth:
+            c.add_eval(n_of(args, out))
+        return out
+    charged.__wrapped__ = orig  # type: ignore[attr-defined]
+    return charged
+
+
 def _patch(owner: Any, name: str, new: Callable) -> None:
     _ORIGINALS.append((owner, name, owner.__dict__[name]))
     setattr(owner, name, new)
@@ -227,6 +242,19 @@ def install() -> None:
     _patch(BOCDBayesAgent, "update", _wrap_cat(BOCDBayesAgent.update, "monitor", _bocd_cache_hits))
     _patch(BOCDBayesAgent, "act", _wrap_cat(BOCDBayesAgent.act, "decision"))
     _patch(BPRPlusAgent, "_finish_learning", _wrap_cat(BPRPlusAgent._finish_learning, "revision"))
+    # BPR+ (MDP implementation): Gaussian performance-model likelihoods in
+    # the belief update (1 each); probability of improvement = per (tau, pi)
+    # one mean for U+ and one tail probability (2 * |O| * |Pi|); value
+    # iteration = |S| * |A| expected-reward lookups per sweep (+1 final Q);
+    # a performance model = |S| lookups.
+    _patch(_bprm, "gauss_pdf", _wrap_eval(_bprm.gauss_pdf))
+    _patch(_bprm, "policy_scores", _charge(_bprm.policy_scores, lambda a, r: 2 * a[1].size))
+    _patch(_bprm, "value_iteration", _charge(_bprm.value_iteration,
+                                              lambda a, r: (r[1] + 1) * _bprm.S * _bprm.A))
+    _patch(_bprm, "performance_model", _charge(_bprm.performance_model, lambda a, r: _bprm.S))
+    _patch(BPRPlusMDPAgent, "update", _wrap_cat(BPRPlusMDPAgent.update, "monitor"))
+    _patch(BPRPlusMDPAgent, "act", _wrap_cat(BPRPlusMDPAgent.act, "decision"))
+    _patch(BPRPlusMDPAgent, "_finish_learning", _wrap_cat(BPRPlusMDPAgent._finish_learning, "revision"))
     # Conjugate-count baselines: analytic 1 + 1 per step.
     for cls in (ContinuousBayesAgent, WindowedBayesAgent, DiscountedBayesAgent):
         _patch(cls, "update", _analytic("monitor", cls.update))

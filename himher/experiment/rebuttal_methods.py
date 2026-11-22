@@ -118,17 +118,39 @@ BPR_BELIEF_FLOOR = 0.01
 # (2.185). Any rho in [0.56, 0.67] gives the same rule here: p takes
 # values in {0.1, 0.9} under M_L, so p_hat < rho <=> >= 3 of the last 7
 # hands are surprising under every known model.
-BPR_RHO = 0.67
+BPR_BERN_RHO = 0.67
 
 
-def make_bpr_agent(seed: int, rho: float | None = None) -> "BPRPlusAgent":
+def make_bpr_bern_agent(seed: int, rho: float | None = None, library=None) -> Any:
+    """First BPR+ implementation (11/22 a.m.): exact Bernoulli performance
+    models, closed-form best responses. Kept for reproducibility as
+    "BPR+bern"; superseded by the MDP implementation below."""
     from himher.baselines.bpr_plus import BPRPlusAgent
-    return BPRPlusAgent(cond.LIBRARY_0, np.random.default_rng(seed),
-                        rho=BPR_RHO if rho is None else rho, n=BPR_N, epsilon=EPSILON,
+    return BPRPlusAgent(cond.LIBRARY_0 if library is None else library, np.random.default_rng(seed),
+                        rho=BPR_BERN_RHO if rho is None else rho, n=BPR_N, epsilon=EPSILON,
                         learn_rounds=BPR_LEARN_ROUNDS, belief_floor=BPR_BELIEF_FLOOR, alpha=ALPHA)
 
 
+# BPR+ as in the paper (author's request, 11/22): opponent strategies are
+# MDPs (learned by counts), policies by value iteration, Gaussian
+# performance models, probability-of-improvement selection
+# (himher/baselines/bpr_plus_mdp.py). Same n, epsilon, learning-phase
+# length and belief floor as above. rho lives on a density scale here and
+# is recalibrated by the same procedure (rebuttal_bpr_calibrate.py --tag mdp).
+# Calibrated (rebuttal_bpr_calibrate.py --tag mdp, 0.01 grid on 0.05-2.00):
+# largest rho with mean Stationary false alarms (1.98/episode) <= H+H's (2.185).
+BPR_RHO = 0.77
+
+
+def make_bpr_agent(seed: int, rho: float | None = None, library=None) -> Any:
+    from himher.baselines.bpr_plus_mdp import BPRPlusMDPAgent
+    return BPRPlusMDPAgent(cond.LIBRARY_0 if library is None else library, np.random.default_rng(seed),
+                           rho=BPR_RHO if rho is None else rho, n=BPR_N, epsilon=EPSILON,
+                           learn_rounds=BPR_LEARN_ROUNDS, belief_floor=BPR_BELIEF_FLOOR)
+
+
 register("BPR+", "BPR+", "default", lambda seed, spec: make_bpr_agent(seed))
+register("BPR+bern", "BPR+bern", "default", lambda seed, spec: make_bpr_bern_agent(seed))
 
 # BOCPD (author's bocd_bayes.py, unchanged): Adams & MacKay recursion over
 # the L0 hypotheses, no run-length pruning. hazard = 0.01 is an untuned

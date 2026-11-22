@@ -5,7 +5,8 @@ OMP/MKL/OPENBLAS threads = 1 (set before numpy is imported), and one
 discarded warm-up run per method before its timed runs.
 
 Performance columns are recomputed in the counted run and checked against
-the stored rebuttal summaries (orig, B_baselines, BPR_baseline) for every
+the stored rebuttal summaries (orig, B_baselines, BPR_mdp; BPR_baseline holds
+the first Bernoulli BPR+, compared as BPR+bern) for every
 run that exists there; BOCPD has no stored run.
 
 Usage:
@@ -93,7 +94,9 @@ def main() -> None:
     # Compare both sides after the same CSV round trip, parsed exactly.
     df = pd.read_csv(out / "cost_runs.csv", float_precision="round_trip")
     stored = pd.concat([pd.read_csv(STORED / e / "summary.csv", float_precision="round_trip")
-                        for e in ("orig", "B_baselines", "BPR_baseline")])
+                        for e in ("orig", "B_baselines", "BPR_mdp")]
+                       + [pd.read_csv(STORED / "BPR_baseline" / "summary.csv", float_precision="round_trip")
+                          .replace({"method": {"BPR+": "BPR+bern"}})])
     stored = stored[stored.variant == "default"].drop_duplicates(["method", "condition", "seed"])
     cols = ["return_pre", "return_post", "return_total", "auc", "regret_post", "recovery_time"]
     j = df.merge(stored[["method", "condition", "seed", *cols]], on=["method", "condition", "seed"],

@@ -23,7 +23,7 @@ from himher.experiment.rebuttal_methods import METHODS
 from himher.experiment.runner import RoundLog
 
 COST_METHODS = ("HH-R", "HH-A", "FB", "OB", "CB", "WB-k20", "DB-0.90", "DB-0.95", "DB-0.98",
-                "BOCPD", "BPR+")
+                "BOCPD", "BPR+", "BPR+bern")
 
 
 def event_counts(agent: Any) -> dict[str, float]:
@@ -44,8 +44,24 @@ def event_counts(agent: Any) -> dict[str, float]:
     return out
 
 
+PHASE_WINDOW = 50  # T2: steps after each switch
+
+
+def phase_masks(spec: inst.ConditionSpec, T: int) -> dict[str, np.ndarray]:
+    """pre/post the first switch, and the PHASE_WINDOW steps after every
+    switch (w50) vs all other steps (rest)."""
+    t = np.arange(T)
+    first = spec.first_switch
+    pre = t < first if first is not None else np.ones(T, bool)
+    w50 = np.zeros(T, bool)
+    for s in spec.switch_times:
+        w50 |= (t >= s) & (t < s + PHASE_WINDOW)
+    return {"pre": pre, "post": ~pre, "w50": w50, "rest": ~w50}
+
+
 def run_cost(agent: Any, spec: inst.ConditionSpec, seed: int, *, count: bool = True,
-             record_steps: bool = False, record_trajectory: bool = False) -> dict[str, Any]:
+             record_steps: bool = False, record_trajectory: bool = False,
+             phase_split: bool = False) -> dict[str, Any]:
     condition = spec.condition
     schedule = condition.schedule
     T = condition.episode_length
@@ -54,6 +70,7 @@ def run_cost(agent: Any, spec: inst.ConditionSpec, seed: int, *, count: bool = T
     game = SwitchingHandoffGame(schedule, rng)
     logs: list[RoundLog] = []
     cum_ev: list[int] = []
+    snaps: list[tuple[int, ...]] = []
     trajectory: list[tuple[float, float]] = []
 
     def agent_call(fn, *args):
@@ -76,6 +93,8 @@ def run_cost(agent: Any, spec: inst.ConditionSpec, seed: int, *, count: bool = T
             logs.append(RoundLog(t, context, ego_action, result.counterpart_action, result.reward))
             if record_steps:
                 cum_ev.append(counter.ev_total)
+            if phase_split:
+                snaps.append((*counter.ev.values(), counter.pol_updates, counter.pol_samples_replayed))
             if record_trajectory:
                 with cc.paused():
                     trajectory.append(tuple(inst.held_theta(agent)))
@@ -100,6 +119,14 @@ def run_cost(agent: Any, spec: inst.ConditionSpec, seed: int, *, count: bool = T
         if hasattr(agent, "detection_times"):  # BPR+: a detection triggers learning
             row["n_revision_triggers"] = len(agent.detection_times)
             row["n_candidates"] = len(agent.learned_models)
+        if phase_split:
+            cum = np.asarray(snaps)
+            per_step = np.diff(np.vstack([np.zeros((1, cum.shape[1]), int), cum]), axis=0)
+            names = [f"ev_{c}" for c in cc.EV_CATS] + ["pol_updates", "pol_samples_replayed"]
+            for ph, mask in phase_masks(spec, T).items():
+                row[f"steps_{ph}"] = int(mask.sum())
+                for j, nme in enumerate(names):
+                    row[f"{nme}_{ph}"] = int(per_step[mask, j].sum())
     extras = {"rewards": [l.reward for l in logs], "actions": [int(l.ego_action) for l in logs],
               "cum_ev": cum_ev, "trajectory": trajectory}
     return {"row": row, "extras": extras}

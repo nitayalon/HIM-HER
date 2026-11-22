@@ -137,7 +137,7 @@ def main() -> None:
 
     # Sanity: realised returns must equal the stored rebuttal summaries.
     summ = pd.concat([pd.read_csv(ROOT / "AAMAS 2027/results/rebuttal_fri" / e / "summary.csv")
-                      for e in ("orig", "B_baselines", "BPR_baseline")
+                      for e in ("orig", "B_baselines", "BPR_mdp")
                       if (ROOT / "AAMAS 2027/results/rebuttal_fri" / e / "summary.csv").exists()])
     summ = summ[summ.variant == "default"].drop_duplicates(["method", "condition", "seed"])
     chk = df[df.phase == "post"].merge(summ, on=["method", "condition", "seed"])

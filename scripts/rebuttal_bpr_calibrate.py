@@ -28,18 +28,23 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from himher.experiment import instrumentation as inst  # noqa: E402
-from himher.experiment.rebuttal_methods import make_bpr_agent  # noqa: E402
+from himher.experiment.rebuttal_methods import make_bpr_agent, make_bpr_bern_agent  # noqa: E402
 from himher.experiment.runner import run_episode  # noqa: E402
 
-RHO_GRID = tuple(round(x, 2) for x in np.arange(0.30, 0.801, 0.01))
-OUT_RUNS = ROOT / "AAMAS 2027" / "results" / "rebuttal_fri" / "bpr_calibration"
+# --tag bern: the first (Bernoulli) BPR+, grid 0.30-0.80 (results kept in
+# bpr_calibration/); --tag mdp: the MDP BPR+, whose detection statistic is a
+# Gaussian density, grid 0.05-2.00.
+GRIDS = {"bern": tuple(round(x, 2) for x in np.arange(0.30, 0.801, 0.01)),
+         "mdp": tuple(round(x, 2) for x in np.arange(0.05, 2.001, 0.01))}
+TAG = "mdp"
 OUT_TABLES = ROOT / "AAMAS 2027" / "reports" / "rebuttal_fri_tables"
 
 
-def run_one(args: tuple[float, int]) -> dict:
-    rho, seed = args
+def run_one(args: tuple[float, int, str]) -> dict:
+    global TAG
+    rho, seed, TAG = args
     spec = inst.condition_by_label("stationary")
-    agent = make_bpr_agent(seed, rho=rho)
+    agent = (make_bpr_agent if TAG == "mdp" else make_bpr_bern_agent)(seed, rho=rho)
     logs = run_episode(agent, spec.condition, seed)
     return {"rho": rho, "seed": seed, "n_false_alarms": len(agent.detection_times),
             "return_total": float(np.mean([l.reward for l in logs]))}
@@ -48,11 +53,16 @@ def run_one(args: tuple[float, int]) -> dict:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--workers", type=int, default=14)
+    ap.add_argument("--tag", choices=sorted(GRIDS), default="mdp")
     args = ap.parse_args()
+    global TAG
+    TAG = args.tag
+    sfx = "" if TAG == "bern" else f"_{TAG}"
+    OUT_RUNS = ROOT / "AAMAS 2027" / "results" / "rebuttal_fri" / f"bpr{sfx}_calibration"
     orig = pd.read_csv(ROOT / "AAMAS 2027/results/rebuttal_fri/orig/summary.csv")
     target = float(orig[(orig.method == "HH-R") & (orig.condition == "stationary")].n_false_alarms.mean())
 
-    tasks = [(rho, s) for rho in RHO_GRID for s in range(200)]
+    tasks = [(rho, s, TAG) for rho in GRIDS[TAG] for s in range(200)]
     with mp.get_context("spawn").Pool(args.workers) as pool:
         rows = pool.map(run_one, tasks, chunksize=50)
     df = pd.DataFrame(rows)
@@ -64,14 +74,14 @@ def main() -> None:
     feasible = summ[summ.n_false_alarms <= target]
     chosen = float(feasible.rho.max()) if not feasible.empty else float(summ.rho.min())
 
-    lines = [f"BPR+ rho calibration on Stationary (seeds 0-199, n = 7). Target = H+H's mean false alarms "
+    lines = [f"BPR+ ({TAG}) rho calibration on Stationary (seeds 0-199, n = 7). Target = H+H's mean false alarms "
              f"per Stationary episode at the frozen kappa = {target:.3f}. Chosen rho = **{chosen:.2f}** "
              "(largest rho, i.e. most sensitive, with mean false alarms <= target).", "",
              "| rho | mean false alarms / episode | mean return |", "|---|---|---|"]
     for _, r in summ.iterrows():
         mark = " ←" if abs(r.rho - chosen) < 1e-9 else ""
         lines.append(f"| {r.rho:.2f}{mark} | {r.n_false_alarms:.3f} | {r.return_total:.3f} |")
-    (OUT_TABLES / "bpr_calibration.md").write_text("\n".join(lines), encoding="utf-8")
+    (OUT_TABLES / f"bpr{sfx}_calibration.md").write_text("\n".join(lines), encoding="utf-8")
     print(f"target={target:.3f} chosen rho={chosen:.2f}")
     print(summ.to_string(index=False))
 
