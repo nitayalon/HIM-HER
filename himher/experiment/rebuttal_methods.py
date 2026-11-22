@@ -105,6 +105,31 @@ register("HH-R@him_window+decay_reset", "HH-R", "him_window+decay_reset",
                                           eps_half_life=EPS_HALF_LIFE))
 D_METHODS = ("HH-R@decay_reset", "HH-R@him_window+decay_reset")
 
+# BPR+ (Hernandez-Leal et al., AAAI-16 workshop). Exploration matched to
+# H+H (author's choice): drift epsilon = H+H's epsilon, learning phase =
+# H+H's window k. n = 7 is the paper's value. rho is calibrated on
+# Stationary by scripts/rebuttal_bpr_calibrate.py (the paper's 0.8 was
+# tuned for the iPD). The belief floor is not given in the paper.
+BPR_N = 7
+BPR_LEARN_ROUNDS = WINDOW
+BPR_BELIEF_FLOOR = 0.01
+# Calibrated (rebuttal_bpr_calibrate.py): the largest rho on a 0.01 grid
+# whose mean Stationary false alarms (1.805/episode) do not exceed H+H's
+# (2.185). Any rho in [0.56, 0.67] gives the same rule here: p takes
+# values in {0.1, 0.9} under M_L, so p_hat < rho <=> >= 3 of the last 7
+# hands are surprising under every known model.
+BPR_RHO = 0.67
+
+
+def make_bpr_agent(seed: int, rho: float | None = None) -> "BPRPlusAgent":
+    from himher.baselines.bpr_plus import BPRPlusAgent
+    return BPRPlusAgent(cond.LIBRARY_0, np.random.default_rng(seed),
+                        rho=BPR_RHO if rho is None else rho, n=BPR_N, epsilon=EPSILON,
+                        learn_rounds=BPR_LEARN_ROUNDS, belief_floor=BPR_BELIEF_FLOOR, alpha=ALPHA)
+
+
+register("BPR+", "BPR+", "default", lambda seed, spec: make_bpr_agent(seed))
+
 # Mapping to the method names used in the stored paper results.
 PAPER_NAME = {"HH-R": "hh_replay", "HH-A": "hh_ablation", "FB": "fixed_bayes",
               "OB": "oracle_bayes", "CB": "continuous_bayes"}

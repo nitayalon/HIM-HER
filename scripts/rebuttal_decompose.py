@@ -44,7 +44,7 @@ from himher.experiment.rebuttal_methods import METHODS  # noqa: E402
 
 OUT_RUNS = ROOT / "AAMAS 2027" / "results" / "rebuttal_fri" / "decomposition"
 OUT_TABLES = ROOT / "AAMAS 2027" / "reports" / "rebuttal_fri_tables"
-METHOD_KEYS = ("HH-R", "HH-A", "FB", "OB", "CB", "WB-k20", "DB-0.90", "DB-0.95", "DB-0.98")
+METHOD_KEYS = ("HH-R", "HH-A", "FB", "OB", "CB", "WB-k20", "DB-0.90", "DB-0.95", "DB-0.98", "BPR+")
 EARLY = 50  # "early post-switch" = first 50 rounds after the first switch
 
 
@@ -72,7 +72,12 @@ def run_one(args: tuple[str, str, int]) -> dict:
         th_true = true_m.theta1 if x else true_m.theta0
         held = inst.held_theta(agent)
         a_br = br(held[x])
-        a_greedy = int(agent.policy.greedy_action(x, agent.cascade.incumbent)) if is_hh else a_br
+        if is_hh:
+            a_greedy = int(agent.policy.greedy_action(x, agent.cascade.incumbent))
+        elif hasattr(agent, "greedy_action"):  # BPR+: epsilon + learning-phase actions
+            a_greedy = int(agent.greedy_action(x))
+        else:
+            a_greedy = a_br
         a = int(agent.act(x))
         res = game.step(x, Hand(a))
         agent.update(x, Hand(a), res.counterpart_action, res.reward)
@@ -82,7 +87,7 @@ def run_one(args: tuple[str, str, int]) -> dict:
         rows[t] = (res.reward, e_a, r_star - e_br, e_br - e_gr, e_gr - e_a,
                    inst.context_avg_kl(true_m, held),
                    float(a_br == br(th_true)) if decisive else np.nan,
-                   float(decisive), float(a != a_greedy) if is_hh else 0.0)
+                   float(decisive), float(a != a_greedy))
     return {"key": key, "condition": label, "seed": seed, "rows": rows}
 
 
@@ -132,7 +137,8 @@ def main() -> None:
 
     # Sanity: realised returns must equal the stored rebuttal summaries.
     summ = pd.concat([pd.read_csv(ROOT / "AAMAS 2027/results/rebuttal_fri" / e / "summary.csv")
-                      for e in ("orig", "B_baselines")])
+                      for e in ("orig", "B_baselines", "BPR_baseline")
+                      if (ROOT / "AAMAS 2027/results/rebuttal_fri" / e / "summary.csv").exists()])
     summ = summ[summ.variant == "default"].drop_duplicates(["method", "condition", "seed"])
     chk = df[df.phase == "post"].merge(summ, on=["method", "condition", "seed"])
     max_diff = float((chk.reward - chk.return_post).abs().max())

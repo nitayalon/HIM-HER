@@ -346,6 +346,12 @@ def run_instrumented(
         summary["n_voc_declined"] = 0
         summary["n_revisions"] = sum(1 for s in step_logs if s.revised)
         summary["n_policy_updates"] = agent.policy.total_updates
+    elif hasattr(agent, "detection_times"):  # BPR+: new-strategy detections
+        cutoff = first_switch if first_switch is not None else T
+        summary["n_detections"] = len(agent.detection_times)
+        summary["n_false_alarms"] = sum(1 for t in agent.detection_times if t < cutoff)
+        summary["n_accept_construct"] = len(agent.learned_models)
+        summary["n_revisions"] = len(agent.learned_models)
 
     per_step_arrays = None
     if want_steps:

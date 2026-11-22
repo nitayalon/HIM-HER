@@ -24,7 +24,7 @@ ROOT = Path(__file__).resolve().parents[1]
 RUNS = ROOT / "AAMAS 2027" / "results" / "rebuttal_fri"
 REPORTS = ROOT / "AAMAS 2027" / "reports"
 OUT = REPORTS / "rebuttal_fri_tables"
-EXPERIMENTS = ["orig", "B_baselines", "A_replay_scope", "D_eps_schedule"]
+EXPERIMENTS = ["orig", "B_baselines", "A_replay_scope", "D_eps_schedule", "BPR_baseline"]
 N_BOOT = 10_000
 BOOT_SEED = 20261120
 SWITCH = {"within_library_switch": 150, "outside_library_switch_m1": 150,
@@ -33,7 +33,8 @@ COND_ORDER = ["stationary", "within_library_switch", "outside_library_switch_m1"
               "outside_library_switch_m2", "recurring"]
 ARM_ORDER = ["HH-R|default", "HH-R|him_window", "HH-R|post_detection", "HH-R|decay_reset",
              "HH-R|him_window+decay_reset", "HH-A|default", "FB|default", "OB|default", "CB|default",
-             "WB-k20|default", "DB-0.90|default", "DB-0.95|default", "DB-0.98|default"]
+             "WB-k20|default", "DB-0.90|default", "DB-0.95|default", "DB-0.98|default",
+             "BPR+|default"]
 METRICS = ["return_pre", "return_post", "return_total", "regret_post", "recovery_time",
            "n_false_alarms", "kld_final"]
 
@@ -152,9 +153,9 @@ def paired(s: pd.DataFrame, a: str, b: str, metrics: list[str], conds: list[str]
 def paired_tables(s: pd.DataFrame) -> tuple[pd.DataFrame, str]:
     switch_conds = [c for c in COND_ORDER if c != "stationary"]
     rows = []
-    for b in ["WB-k20|default", "DB-0.90|default", "DB-0.95|default", "DB-0.98|default"]:
+    for b in ["WB-k20|default", "DB-0.90|default", "DB-0.95|default", "DB-0.98|default", "BPR+|default"]:
         rows += [dict(r, block="4a") for r in paired(s, "HH-R|default", b, ["return_post", "regret_post", "auc"], switch_conds)]
-    rows += [dict(r, block="4a") for b in ["WB-k20|default", "DB-0.90|default", "DB-0.95|default", "DB-0.98|default"]
+    rows += [dict(r, block="4a") for b in ["WB-k20|default", "DB-0.90|default", "DB-0.95|default", "DB-0.98|default", "BPR+|default"]
              for r in paired(s, "HH-R|default", b, ["auc"], ["stationary"])]
     scope_conds = ["within_library_switch"] + [c for c in switch_conds if c != "within_library_switch"]
     for b in ["HH-R|him_window", "HH-R|post_detection", "HH-A|default"]:
@@ -164,7 +165,7 @@ def paired_tables(s: pd.DataFrame) -> tuple[pd.DataFrame, str]:
         rows += [dict(r, block="4c") for r in paired(s, "HH-R|default", b, ["return_pre", "return_post", "auc"], COND_ORDER)]
     t = pd.DataFrame(rows)
     md = []
-    titles = {"4a": "HH-R (default) minus windowed / discounted Bayes",
+    titles = {"4a": "HH-R (default) minus windowed / discounted Bayes and BPR+",
               "4b": "Replay scope: HH-R full minus each alternative (and post_detection minus HH-A)",
               "4c": "ε schedule: HH-R constant minus decay_reset"}
     for block, title in titles.items():
