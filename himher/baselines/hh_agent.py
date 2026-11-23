@@ -18,12 +18,28 @@ import numpy as np
 
 from himher.core.cascade import CascadeStepLog, HHCascade
 from himher.core.her import ReplayBuffer
+from himher.core.regime import Regime
 from himher.domains.handoff.env import Context, Hand
 from himher.domains.handoff.policy import TabularQPolicy, Transition
 
 
-REPLAY_SCOPES = ("full", "him_window", "post_detection")
+REPLAY_SCOPES = ("full", "him_window", "post_detection", "context_filtered", "op_gated")
 EPS_SCHEDULES = ("constant", "decay_reset")
+
+
+def unchanged_contexts(prev, accepted, delta: float, contexts=(0, 1)) -> tuple[int, ...]:
+    """Contexts c whose parameter moved by at most delta at this acceptance,
+    judged on the agent's own models (never the ground truth)."""
+    th_p, th_a = prev.theta, accepted.theta
+    return tuple(c for c in contexts if abs(th_a[c] - th_p[c]) <= delta)
+
+
+def select_context_filtered(times, transitions, first_detection: int, unchanged: tuple[int, ...]):
+    """Monday Task F: from the buffer (= HIM window), every transition at or
+    after the detection run's first round, plus earlier ones only in
+    unchanged contexts. Buffer order is kept."""
+    return [(tt, tr) for tt, tr in zip(times, transitions)
+            if tt >= first_detection or tr.context in unchanged]
 
 
 def decay_reset_epsilon(t: int, t_reset: int, eps0: float, eps_min: float, half_life: float) -> float:
@@ -43,6 +59,7 @@ class HHAgent:
         eps0: float = 0.15,
         eps_min: float = 0.02,
         eps_half_life: float = 50.0,
+        context_delta: float = 0.1,
     ) -> None:
         """``replay`` toggles Section 5.2's ablation: when False, the
         buffer of pre-acceptance transitions is discarded on revision
@@ -59,6 +76,12 @@ class HHAgent:
             of the detection run that ended in this acceptance (the earliest
             round of the uninterrupted streak of detected rounds since the
             previous acceptance), limited to what the buffer still holds.
+          - "context_filtered" (Monday Task F): the post_detection set plus
+            pre-detection buffered transitions in contexts c with
+            |theta_acc,c - theta_prev,c| <= ``context_delta`` (theta_prev =
+            the incumbent before this round's revision; agent's models only).
+          - "op_gated" (Monday Task F): as "full", but nothing is replayed
+            when the accepted operator is reuse (the buffer is kept).
 
         ``eps_schedule`` (rebuttal Task D):
           - "constant" (default): the policy's own fixed epsilon. Unchanged.
@@ -89,6 +112,11 @@ class HHAgent:
         # (t, n_replayed, first replayed round, last replayed round), per acceptance.
         self.last_replay: tuple[int, int, int, int] | None = None
         self.replay_log: list[tuple[int, int, int, int]] = []
+        # Task F logging (None for the pre-existing scopes, so their event
+        # logs are unchanged): per-context replay counts and the contexts
+        # judged unchanged at the last acceptance.
+        self.last_replay_detail: dict | None = None
+        self._context_delta = context_delta
         self.last_step_log: CascadeStepLog | None = None
         self.step_logs: list[CascadeStepLog] = []
         self._eps_schedule = eps_schedule
@@ -153,7 +181,9 @@ class HHAgent:
 
         if step_log.revised:
             if self._replay:
-                if self._replay_scope == "full":
+                if self._replay_scope in ("context_filtered", "op_gated"):
+                    self._replay_task_f(t, model_at_action_time, step_log)
+                elif self._replay_scope == "full":
                     n = len(self._buffer)
                     self._buffer.relabel_and_replay(self._cascade.incumbent, self._policy.update)
                     first = self._buffer_times[0]
@@ -170,7 +200,8 @@ class HHAgent:
                         self._policy.update(tr, self._cascade.incumbent)
                     n = len(selected)
                     first = selected[0][0]
-                self.last_replay = (t, n, first, t)
+                if self._replay_scope not in ("context_filtered", "op_gated"):
+                    self.last_replay = (t, n, first, t)
             else:
                 # Ablation (Section 5.2): discard the buffered,
                 # pre-acceptance experience instead of replaying it;
@@ -181,3 +212,25 @@ class HHAgent:
             self.replay_log.append(self.last_replay)
             self._detect_run_start = None
         self._t += 1
+
+    def _replay_task_f(self, t: int, prev_model, step_log: CascadeStepLog) -> None:
+        accepted = self._cascade.incumbent
+        if self._replay_scope == "op_gated":
+            unchanged: tuple[int, ...] = ()
+            if step_log.regime == Regime.REUSE:
+                selected = []
+            else:
+                selected = list(zip(self._buffer_times, self._buffer))
+        else:
+            unchanged = unchanged_contexts(prev_model, accepted, self._context_delta)
+            selected = select_context_filtered(self._buffer_times, self._buffer,
+                                               self._detect_run_start, unchanged)
+        for _, tr in selected:
+            self._policy.update(tr, accepted)
+        n = len(selected)
+        self.last_replay = (t, n, selected[0][0], t) if n else (t, 0, -1, -1)
+        self.last_replay_detail = {
+            "n_replayed_ctx0": sum(1 for _, tr in selected if tr.context == 0),
+            "n_replayed_ctx1": sum(1 for _, tr in selected if tr.context == 1),
+            "unchanged_contexts": ";".join(map(str, unchanged)) if unchanged else "none",
+        }

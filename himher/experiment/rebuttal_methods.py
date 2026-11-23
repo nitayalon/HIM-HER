@@ -190,6 +190,14 @@ register("HH-plan-eps", "HH-plan-eps", "default", lambda seed, spec: make_hh_pla
 register("WB-k20-eps", "WB-k20-eps", "default", lambda seed, spec: make_wb_eps_agent(seed))
 P_METHODS = ("HH-plan", "HH-plan-eps", "WB-k20-eps")
 
+# Monday Task F: context-filtered and operator-gated replay (HH-R; delta =
+# HIM's distinctness threshold DELTA = 0.1, judged on the agent's models).
+for _scope in ("context_filtered", "op_gated"):
+    register(f"HH-R@{_scope}", "HH-R", _scope,
+             lambda seed, spec, sc=_scope: make_hh_agent(seed, replay=True, replay_scope=sc,
+                                                         context_delta=DELTA))
+F_METHODS = ("HH-R@context_filtered", "HH-R@op_gated")
+
 # Mapping to the method names used in the stored paper results.
 PAPER_NAME = {"HH-R": "hh_replay", "HH-A": "hh_ablation", "FB": "fixed_bayes",
               "OB": "oracle_bayes", "CB": "continuous_bayes"}

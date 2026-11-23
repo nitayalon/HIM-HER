@@ -294,6 +294,9 @@ def run_instrumented(
                     if replay is not None and replay[0] == t:
                         extra = {"n_replayed": replay[1], "replay_start": replay[2],
                                  "replay_end": replay[3]}
+                        detail = getattr(agent, "last_replay_detail", None)
+                        if detail is not None:  # Task F scopes only
+                            extra |= detail
                     events.append({**row, "event": "accept", **extra})
                     detect_run_attempts = 0
                 else:
