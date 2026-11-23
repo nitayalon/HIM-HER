@@ -52,7 +52,8 @@ CONDS = ("within_library_switch", "outside_library_switch_m2", "recurring")
 NICE = {"within_library_switch": "Within-library", "outside_library_switch_m2": "Outside m2",
         "recurring": "Recurring", "outside_library_switch_m1": "Outside m1", "stationary": "Stationary"}
 SCOPES = {"full": "HH-R", "him_window": "HH-R@him_window", "post_detection": "HH-R@post_detection",
-          "context_filtered": "HH-R@context_filtered"}  # last: Monday Task F (opt-in via --scopes)
+          "context_filtered": "HH-R@context_filtered",  # Monday Task F (opt-in via --scopes)
+          "cp_joint": "HH-R@cp_joint", "cp_per_context": "HH-R@cp_per_context"}  # Monday Task C
 DEFAULT_SCOPES = ("full", "him_window", "post_detection")
 MON = ROOT / "AAMAS 2027" / "results" / "rebuttal_mon"
 CAPACITY = rm.WINDOW  # HHAgent: ReplayBuffer(maxlen=cascade.window), FIFO deque
@@ -155,8 +156,10 @@ def main() -> None:
     # ---- Step 1: inputs --------------------------------------------------
     orig_ev = pd.read_csv(STORED / "orig" / "events.csv", nrows=1)
     a_ev = pd.read_csv(STORED / "A_replay_scope" / "events.csv", float_precision="round_trip")
-    if "context_filtered" in args.scopes:
-        a_ev = pd.concat([a_ev, pd.read_csv(MON / "F" / "events.csv", float_precision="round_trip")],
+    mon_dirs = ([MON / "F"] if "context_filtered" in args.scopes else []) + \
+        ([MON / "C"] if any(sc.startswith("cp_") for sc in args.scopes) else [])
+    if mon_dirs:
+        a_ev = pd.concat([a_ev, *[pd.read_csv(d / "events.csv", float_precision="round_trip") for d in mon_dirs]],
                          ignore_index=True)
     per_step_files = sorted(p.relative_to(ROOT).as_posix() for p in STORED.glob("*/per_step.npz"))
     inputs = [
@@ -201,7 +204,7 @@ def main() -> None:
         runs = pool.map(rerun_one, tasks, chunksize=2)
 
     # bitwise check against stored summaries
-    stored_dirs = [STORED / "orig", STORED / "A_replay_scope"] + ([MON / "F"] if "context_filtered" in args.scopes else [])
+    stored_dirs = [STORED / "orig", STORED / "A_replay_scope"] + mon_dirs
     stored = pd.concat([pd.read_csv(d / "summary.csv", float_precision="round_trip") for d in stored_dirs])
     stored = stored[stored.method == "HH-R"].drop_duplicates(["condition", "variant", "seed"])
     new = pd.DataFrame([{**r["summary"], "condition": r["condition"], "seed": r["seed"],
@@ -251,10 +254,22 @@ def main() -> None:
                 unchanged = unchanged_contexts(BernoulliHandModel(float(a.cur_theta0), float(a.cur_theta1)),
                                                BernoulliHandModel(float(a.cand_theta0), float(a.cand_theta1)),
                                                rm.DELTA)
-            R = replay_rounds(r["scope"], t_acc, detected, accept_ts, ctx, unchanged)
+            if r["scope"].startswith("cp_"):
+                from himher.baselines.hh_agent import select_changepoint
+                from himher.domains.handoff.policy import Transition
+                win = list(range(max(0, t_acc - CAPACITY + 1), t_acc + 1))
+                sel, *_ = select_changepoint(
+                    win, [Transition(int(ctx[w]), Hand.L, Hand(int(act[w])), 0.0) for w in win],
+                    BernoulliHandModel(float(a.cur_theta0), float(a.cur_theta1)),
+                    BernoulliHandModel(float(a.cand_theta0), float(a.cand_theta1)), rm.DELTA,
+                    per_context=r["scope"] == "cp_per_context")
+                R = [w for w, _ in sel]
+            else:
+                R = replay_rounds(r["scope"], t_acc, detected, accept_ts, ctx, unchanged)
             # reconstruction check vs the logged replay fields (re-run and stored)
             logged = (int(a.n_replayed), int(a.replay_start), int(a.replay_end))
-            mine = (len(R), R[0], R[-1])
+            # the agent logs replay_end = t_acc for every non-empty replay
+            mine = (len(R), R[0], t_acc) if R else (0, -1, -1)
             st_row = stored_acc.loc[(a.run_id, t_acc)] if (a.run_id, t_acc) in stored_acc.index else None
             st_val = None if st_row is None else (int(st_row.n_replayed), int(st_row.replay_start),
                                                    int(st_row.replay_end))

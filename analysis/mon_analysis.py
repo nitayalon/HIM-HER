@@ -53,7 +53,9 @@ def fmt(m, lo, hi, d=3, star=False) -> str:
 
 def load() -> pd.DataFrame:
     parts = []
-    for d in (FRI / "orig", FRI / "B_baselines", FRI / "BPR_mdp", MON / "P", MON / "F"):
+    for d in (FRI / "orig", FRI / "B_baselines", FRI / "BPR_mdp", MON / "P", MON / "F", MON / "C"):
+        if not (d / "summary.csv").exists():
+            continue
         s = pd.read_csv(d / "summary.csv")
         parts.append(s)
     s = pd.concat(parts, ignore_index=True).drop_duplicates("run_id")
@@ -216,11 +218,125 @@ def task_f(s: pd.DataFrame) -> list[str]:
     return L
 
 
+# --------------------------------------------------------------------- C ---
+def _accepts(path: Path) -> pd.DataFrame:
+    ev = pd.read_csv(path, float_precision="round_trip", low_memory=False)
+    acc = ev[ev.event == "accept"].copy()
+    p = acc.run_id.str.split("__")
+    acc["condition"], acc["scope"], acc["seed"] = p.str[0], p.str[2], p.str[3].str[1:].astype(int)
+    return acc
+
+
+def task_c(s: pd.DataFrame) -> list[str]:
+    out = MON / "C"
+    CF, CJ, CP = "HH-R@context_filtered", "HH-R@cp_joint", "HH-R@cp_per_context"
+    comps = [(CJ, "HH-A"), (CJ, "HH-R"), (CJ, CF), (CP, "HH-A"), (CP, CJ)]
+    rows = pd.DataFrame([r for a, b in comps for r in paired(s, a, b)])
+    rows.to_csv(out / "paired.csv", index=False)
+    L = ["# Task C — changepoint-aligned replay", ""]
+    beats = []
+    for c in CONDS[1:]:
+        g = rows[(rows.A == CJ) & (rows.B == "HH-A") & (rows.condition == c)].set_index("metric")
+        ok = {m: bool(g.loc[m, "lo"] > 0) for m in ("return_post", "auc")}
+        beats.append(f"{c}: return_post {'yes' if ok['return_post'] else 'no'} "
+                     f"({g.loc['return_post', 'mean']:+.3f} [{g.loc['return_post', 'lo']:+.3f}, {g.loc['return_post', 'hi']:+.3f}]), "
+                     f"auc {'yes' if ok['auc'] else 'no'} ({g.loc['auc', 'mean']:+.2f} [{g.loc['auc', 'lo']:+.2f}, {g.loc['auc', 'hi']:+.2f}])")
+    L += ["**Does cp_joint beat HH-A on return_post and auc (CI > 0)?**", "", *[f"- {b}" for b in beats], ""]
+    L += paired_md(rows, "Changepoint-aligned replay: paired differences.")
+
+    cpa = _accepts(out / "events.csv")
+    cfa = _accepts(MON / "F" / "events.csv")
+    ref = pd.read_csv(FRI / "A_replay_scope" / "events.csv", usecols=["run_id", "event", "n_replayed"])
+    ref = ref[(ref.event == "accept") & ref.run_id.str.contains("__HH-R__default__")].copy()
+    rp = ref.run_id.str.split("__")
+    ref["condition"], ref["seed"] = rp.str[0], rp.str[3].str[1:].astype(int)
+    L += ["**Transitions replayed per acceptance** (per-seed means, then mean [95% CI] over 200 seeds). Last column: "
+          "share of acceptances with no / one / both contexts judged changed (context_filtered: judged unchanged).", "",
+          "| condition | scope | acceptances | n_replayed | context 0 | context 1 | contexts judged changed |",
+          "|---|---|---|---|---|---|---|"]
+    for c in CONDS:
+        g = ref[ref.condition == c]
+        L.append(f"| {c} | full (HH-R) | {len(g)} | {fmt(*mean_ci(g.groupby('seed').n_replayed.mean().reindex(range(200))), 2)} | | | |")
+        for sc in ("context_filtered", "cp_joint", "cp_per_context"):
+            src = cfa if sc == "context_filtered" else cpa
+            g = src[(src.condition == c) & (src.scope == sc)]
+            per = g.groupby("seed")[["n_replayed", "n_replayed_ctx0", "n_replayed_ctx1"]].mean().reindex(range(200))
+            if sc == "context_filtered":
+                vc = g.unchanged_contexts.astype(str).value_counts(normalize=True)
+                ch = f"unchanged none {vc.get('none', 0):.2f} / one {vc.get('0', 0) + vc.get('1', 0):.2f} / both {vc.get('0;1', 0):.2f}"
+            else:
+                vc = g.changed_contexts.astype(str).value_counts(normalize=True)
+                ch = f"none {vc.get('none', 0):.2f} / one {vc.get('0', 0) + vc.get('1', 0):.2f} / both {vc.get('0;1', 0):.2f}"
+            L.append(f"| {c} | {sc} | {len(g)} | {fmt(*mean_ci(per.n_replayed), 2)} | {fmt(*mean_ci(per.n_replayed_ctx0), 2)} | "
+                     f"{fmt(*mean_ci(per.n_replayed_ctx1), 2)} | {ch} |")
+
+    per = pd.read_csv(out / "replay_diag" / "per_acceptance.csv")
+    per = per[per.t_sw.notna()]
+    scopes = ("full", "context_filtered", "cp_joint", "cp_per_context")
+    L += ["", "**Contamination** (`analysis/replay_diagnostic.py --scopes full context_filtered cp_joint cp_per_context`, "
+          "20 seeds, acceptances at or after the first switch; per-seed means, then mean [95% CI]; n = acceptances "
+          "with pre-switch replay in that context). Re-runs bitwise identical to the stored runs; replay "
+          "reconstruction 1680/1680.", "",
+          "| condition | context | metric | full | context_filtered | cp_joint | cp_per_context |",
+          "|---|---|---|---|---|---|---|"]
+    for c in CONDS[1:]:
+        for cx in ("all", "0", "1"):
+            ps, gp = [], []
+            for sc in scopes:
+                g = per[(per.condition == c) & (per.replay_scope == sc) & (per.context.astype(str) == cx)]
+                sm = g.groupby("seed")[["pre_share", "gap_pre"]].mean()
+                ps.append(fmt(*mean_ci(sm.pre_share)) or "—")
+                gp.append((fmt(*mean_ci(sm.gap_pre)) or "—") + f" (n={int((g.n_R_pre > 0).sum())})")
+            L.append(f"| {c} | {cx} | pre_share | " + " | ".join(ps) + " |")
+            L.append(f"| {c} | {cx} | gap_pre | " + " | ".join(gp) + " |")
+
+    def sw_in(row) -> float:
+        sws = inst.condition_by_label(row.condition).switch_times
+        inside = [x for x in sws if row.window_start < x <= row.window_end]
+        return float(inside[0]) if inside else np.nan
+
+    cpa = cpa.copy()
+    cpa["t_sw_in"] = cpa.apply(sw_in, axis=1)
+    L += ["", "**Split accuracy** (evaluation only, uses ground truth). A window *contains* the switch t_sw when "
+          "w_s < t_sw ≤ w_e (it holds both pre- and post-switch rounds). Only acceptances with at least one changed "
+          "context (otherwise no split is estimated); cp_per_context contributes one row per changed context. "
+          "Per-seed means, then mean [95% CI] over seeds.", "",
+          "| condition | variant | splits with switch in window | ŝ − t_sw | fraction within ±2 | "
+          "splits without switch in window | fraction ŝ = w_s (replay all) |", "|---|---|---|---|---|---|---|"]
+    srows = []
+    for c in CONDS:
+        for sc in ("cp_joint", "cp_per_context"):
+            g = cpa[(cpa.condition == c) & (cpa.scope == sc) & (cpa.changed_contexts.astype(str) != "none")]
+            if sc == "cp_joint":
+                long = g.assign(sh=g.s_hat)
+            else:
+                parts = []
+                for cx in (0, 1):
+                    gg = g[g.changed_contexts.astype(str).str.contains(str(cx))]
+                    parts.append(gg.assign(sh=gg[f"s_hat_ctx{cx}"]))
+                long = pd.concat(parts)
+            inn, outw = long[long.t_sw_in.notna()], long[long.t_sw_in.isna()]
+            err = inn.sh - inn.t_sw_in
+            e_seed = err.groupby(inn.seed).mean().reindex(range(200))
+            w_seed = (err.abs() <= 2).astype(float).groupby(inn.seed).mean().reindex(range(200))
+            o_seed = (outw.sh == outw.window_start).astype(float).groupby(outw.seed).mean().reindex(range(200))
+            L.append(f"| {c} | {sc} | {len(inn)} | {fmt(*mean_ci(e_seed), 2) or '—'} | {fmt(*mean_ci(w_seed), 3) or '—'} | "
+                     f"{len(outw)} | {fmt(*mean_ci(o_seed), 3) or '—'} |")
+            srows.append({"condition": c, "variant": sc, "n_in": len(inn), "err_mean": err.mean() if len(inn) else np.nan,
+                          "within2": (err.abs() <= 2).mean() if len(inn) else np.nan, "n_out": len(outw),
+                          "frac_replay_all_out": (outw.sh == outw.window_start).mean() if len(outw) else np.nan})
+    pd.DataFrame(srows).to_csv(out / "split_accuracy.csv", index=False)
+    (out / "tables.md").write_text("\n".join(L) + "\n", encoding="utf-8")
+    return L
+
+
 def main() -> None:
     s = load()
     task_p(s)
     task_f(s)
-    print("wrote AAMAS 2027/results/rebuttal_mon/{P,F}/tables.md")
+    if (MON / "C" / "summary.csv").exists():
+        task_c(s)
+    print("wrote AAMAS 2027/results/rebuttal_mon/{P,F,C}/tables.md")
 
 
 if __name__ == "__main__":
