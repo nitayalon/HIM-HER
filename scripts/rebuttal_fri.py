@@ -76,8 +76,8 @@ def _git_head() -> str:
 
 
 def run_experiment(experiment: str, method_keys: list[str], conditions: list[str], seeds: list[int],
-                   log_level: str, workers: int) -> Path:
-    out = OUT_ROOT / experiment
+                   log_level: str, workers: int, root: Path = OUT_ROOT) -> Path:
+    out = root / experiment
     out.mkdir(parents=True, exist_ok=True)
     tasks = [(k, c, s, log_level) for k in method_keys for c in conditions for s in seeds]
     t0 = time.perf_counter()
@@ -137,7 +137,7 @@ def run_experiment(experiment: str, method_keys: list[str], conditions: list[str
             "workers": workers, "elapsed_s": elapsed, "git_head": _git_head(),
             "argv": sys.argv, "hardware": _hardware()}
     (out / "meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
-    print(f"[{experiment}] {len(tasks)} runs in {elapsed:.1f}s -> AAMAS 2027/results/rebuttal_fri/{experiment}", flush=True)
+    print(f"[{experiment}] {len(tasks)} runs in {elapsed:.1f}s -> {out.relative_to(ROOT).as_posix()}", flush=True)
     return out
 
 
@@ -149,11 +149,16 @@ def main() -> None:
     p.add_argument("--seeds", type=int, default=200)
     p.add_argument("--log-level", default="events", choices=inst.LOG_LEVELS)
     p.add_argument("--workers", type=int, default=max(1, (os.cpu_count() or 2) - 2))
+    p.add_argument("--root", default="rebuttal_fri",
+                   help="results subfolder under AAMAS 2027/results (default rebuttal_fri)")
     a = p.parse_args()
     unknown = [k for k in a.methods if k not in METHODS]
     if unknown:
         raise SystemExit(f"unknown methods {unknown}; known: {sorted(METHODS)}")
-    run_experiment(a.experiment, a.methods, a.conditions, list(range(a.seeds)), a.log_level, a.workers)
+    root = ROOT / "AAMAS 2027" / "results" / a.root
+    if (root / a.experiment / "summary.csv").exists():
+        raise SystemExit(f"{root / a.experiment} already has results; refusing to overwrite")
+    run_experiment(a.experiment, a.methods, a.conditions, list(range(a.seeds)), a.log_level, a.workers, root)
 
 
 if __name__ == "__main__":

@@ -39,10 +39,9 @@ EPSILON = 0.15
 KAPPA = 0.6705027574263254
 
 
-def make_hh_agent(seed: int, replay: bool, **hh_kwargs: Any) -> HHAgent:
-    """Identical to compute_phase_returns.make_hh_agent when hh_kwargs is
-    empty; hh_kwargs are the new, default-off HHAgent flags."""
-    cascade = HHCascade(
+def make_hh_cascade() -> HHCascade:
+    """The paper's H+H cascade (detection, VOC, reuse/merge/construct, HIM)."""
+    return HHCascade(
         incumbent=cond.LIBRARY_0[0],
         library=ModelLibrary(cond.LIBRARY_0, max_learned=MAX_LEARNED),
         kappa=KAPPA,
@@ -51,6 +50,12 @@ def make_hh_agent(seed: int, replay: bool, **hh_kwargs: Any) -> HHAgent:
         revise=revise_mixture_model,
         construct=lambda w: construct_bernoulli_model(w, ALPHA),
     )
+
+
+def make_hh_agent(seed: int, replay: bool, **hh_kwargs: Any) -> HHAgent:
+    """Identical to compute_phase_returns.make_hh_agent when hh_kwargs is
+    empty; hh_kwargs are the new, default-off HHAgent flags."""
+    cascade = make_hh_cascade()
     policy = TabularQPolicy(learning_rate=LEARNING_RATE, epsilon=EPSILON)
     return HHAgent(cascade, policy, np.random.default_rng(seed), replay=replay, **hh_kwargs)
 
@@ -165,6 +170,25 @@ def make_bocpd_agent(seed: int, hypotheses=None) -> Any:
 
 
 register("BOCPD", "BOCPD", "default", lambda seed, spec: make_bocpd_agent(seed))
+
+# Monday Task P (11/23): H+H's cascade with WB-k20's closed-form action
+# selection (himher/baselines/hh_plan.py). No exploration (as WB-k20), and
+# matched-exploration variants with constant epsilon = EPSILON (0.15), using
+# the same seeded ego RNG as HH-R so both -eps variants draw identically.
+def make_hh_plan_agent(seed: int, epsilon: float = 0.0) -> Any:
+    from himher.baselines.hh_plan import HHPlanAgent
+    return HHPlanAgent(make_hh_cascade(), np.random.default_rng(seed), epsilon=epsilon)
+
+
+def make_wb_eps_agent(seed: int) -> Any:
+    from himher.baselines.hh_plan import EpsilonGreedy
+    return EpsilonGreedy(WindowedBayesAgent(alpha=ALPHA, window=WB_WINDOW), EPSILON, np.random.default_rng(seed))
+
+
+register("HH-plan", "HH-plan", "default", lambda seed, spec: make_hh_plan_agent(seed))
+register("HH-plan-eps", "HH-plan-eps", "default", lambda seed, spec: make_hh_plan_agent(seed, EPSILON))
+register("WB-k20-eps", "WB-k20-eps", "default", lambda seed, spec: make_wb_eps_agent(seed))
+P_METHODS = ("HH-plan", "HH-plan-eps", "WB-k20-eps")
 
 # Mapping to the method names used in the stored paper results.
 PAPER_NAME = {"HH-R": "hh_replay", "HH-A": "hh_ablation", "FB": "fixed_bayes",
