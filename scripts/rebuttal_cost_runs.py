@@ -96,7 +96,9 @@ def main() -> None:
     stored = pd.concat([pd.read_csv(STORED / e / "summary.csv", float_precision="round_trip")
                         for e in ("orig", "B_baselines", "BPR_mdp")]
                        + [pd.read_csv(STORED / "BPR_baseline" / "summary.csv", float_precision="round_trip")
-                          .replace({"method": {"BPR+": "BPR+bern"}})])
+                          .replace({"method": {"BPR+": "BPR+bern"}})]
+                       + [pd.read_csv(p, float_precision="round_trip")  # Monday Task P runs, when present
+                          for p in [STORED.parent / "rebuttal_mon" / "P" / "summary.csv"] if p.exists()])
     stored = stored[stored.variant == "default"].drop_duplicates(["method", "condition", "seed"])
     cols = ["return_pre", "return_post", "return_total", "auc", "regret_post", "recovery_time"]
     j = df.merge(stored[["method", "condition", "seed", *cols]], on=["method", "condition", "seed"],

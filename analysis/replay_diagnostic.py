@@ -51,7 +51,10 @@ OUT = ROOT / "AAMAS 2027" / "results" / "rebuttal_replay_diag"
 CONDS = ("within_library_switch", "outside_library_switch_m2", "recurring")
 NICE = {"within_library_switch": "Within-library", "outside_library_switch_m2": "Outside m2",
         "recurring": "Recurring", "outside_library_switch_m1": "Outside m1", "stationary": "Stationary"}
-SCOPES = {"full": "HH-R", "him_window": "HH-R@him_window", "post_detection": "HH-R@post_detection"}
+SCOPES = {"full": "HH-R", "him_window": "HH-R@him_window", "post_detection": "HH-R@post_detection",
+          "context_filtered": "HH-R@context_filtered"}  # last: Monday Task F (opt-in via --scopes)
+DEFAULT_SCOPES = ("full", "him_window", "post_detection")
+MON = ROOT / "AAMAS 2027" / "results" / "rebuttal_mon"
 CAPACITY = rm.WINDOW  # HHAgent: ReplayBuffer(maxlen=cascade.window), FIFO deque
 N_BOOT, BOOT_SEED = 10_000, 20261122
 RETURN_COLS = ("return_pre", "return_post", "return_total", "auc")
@@ -65,23 +68,27 @@ def loglik(theta: tuple[float, float], contexts, actions) -> np.ndarray:
     return np.array([model.log_prob(int(c), Hand(int(a))) for c, a in zip(contexts, actions)], float)
 
 
-def replay_rounds(scope: str, t_acc: int, detected: np.ndarray, accept_ts: set[int]) -> list[int]:
+def replay_rounds(scope: str, t_acc: int, detected: np.ndarray, accept_ts: set[int],
+                  contexts=None, unchanged: tuple[int, ...] = ()) -> list[int]:
     """Rounds replayed at an acceptance in round t_acc, from the buffer rules:
     FIFO buffer of the last CAPACITY rounds, never cleared under HH-R;
     full = whole buffer; him_window = HIM's window (the same last-CAPACITY
     rounds, history and buffer are appended in the same call);
     post_detection = from the first round of the uninterrupted run of
     detected rounds ending at t_acc (a run restarts after an acceptance),
-    within the buffer."""
+    within the buffer; context_filtered (Monday Task F) = the post_detection
+    rounds plus earlier buffered rounds whose context is in ``unchanged``."""
     lo = max(0, t_acc - CAPACITY + 1)
     if scope in ("full", "him_window"):
         return list(range(lo, t_acc + 1))
-    if scope != "post_detection":
+    if scope not in ("post_detection", "context_filtered"):
         raise ValueError(scope)
     start = t_acc
     while start - 1 >= 0 and detected[start - 1] and (start - 1) not in accept_ts:
         start -= 1
-    return list(range(max(lo, start), t_acc + 1))
+    if scope == "post_detection":
+        return list(range(max(lo, start), t_acc + 1))
+    return [r for r in range(lo, t_acc + 1) if r >= start or int(contexts[r]) in unchanged]
 
 
 def acceptance_metrics(R, t_sw, contexts, actions, cand, cur, true_pre, context=None) -> dict:
@@ -136,6 +143,7 @@ def main() -> None:
     ap.add_argument("--seeds", type=int, default=20)
     ap.add_argument("--workers", type=int, default=4)
     ap.add_argument("--conditions", nargs="+", default=list(CONDS))
+    ap.add_argument("--scopes", nargs="+", default=list(DEFAULT_SCOPES), choices=list(SCOPES))
     ap.add_argument("--out", default=None, help="output dir relative to AAMAS 2027/results (default rebuttal_replay_diag)")
     args = ap.parse_args()
     CONDS = tuple(args.conditions)
@@ -147,6 +155,9 @@ def main() -> None:
     # ---- Step 1: inputs --------------------------------------------------
     orig_ev = pd.read_csv(STORED / "orig" / "events.csv", nrows=1)
     a_ev = pd.read_csv(STORED / "A_replay_scope" / "events.csv", float_precision="round_trip")
+    if "context_filtered" in args.scopes:
+        a_ev = pd.concat([a_ev, pd.read_csv(MON / "F" / "events.csv", float_precision="round_trip")],
+                         ignore_index=True)
     per_step_files = sorted(p.relative_to(ROOT).as_posix() for p in STORED.glob("*/per_step.npz"))
     inputs = [
         "# Step 1 — inputs", "",
@@ -185,13 +196,13 @@ def main() -> None:
         ""]
 
     # ---- re-run -----------------------------------------------------------
-    tasks = [(s, c, seed) for s in SCOPES for c in CONDS for seed in seeds]
+    tasks = [(s, c, seed) for s in args.scopes for c in CONDS for seed in seeds]
     with mp.get_context("spawn").Pool(args.workers) as pool:
         runs = pool.map(rerun_one, tasks, chunksize=2)
 
     # bitwise check against stored summaries
-    stored = pd.concat([pd.read_csv(STORED / e / "summary.csv", float_precision="round_trip")
-                        for e in ("orig", "A_replay_scope")])
+    stored_dirs = [STORED / "orig", STORED / "A_replay_scope"] + ([MON / "F"] if "context_filtered" in args.scopes else [])
+    stored = pd.concat([pd.read_csv(d / "summary.csv", float_precision="round_trip") for d in stored_dirs])
     stored = stored[stored.method == "HH-R"].drop_duplicates(["condition", "variant", "seed"])
     new = pd.DataFrame([{**r["summary"], "condition": r["condition"], "seed": r["seed"],
                          "variant": METHODS[SCOPES[r["scope"]]].variant} for r in runs])
@@ -234,7 +245,13 @@ def main() -> None:
         first_after: set[int] = set()
         for _, a in acc.iterrows():
             t_acc = int(a.t)
-            R = replay_rounds(r["scope"], t_acc, detected, accept_ts)
+            unchanged = ()
+            if r["scope"] == "context_filtered":
+                from himher.baselines.hh_agent import unchanged_contexts
+                unchanged = unchanged_contexts(BernoulliHandModel(float(a.cur_theta0), float(a.cur_theta1)),
+                                               BernoulliHandModel(float(a.cand_theta0), float(a.cand_theta1)),
+                                               rm.DELTA)
+            R = replay_rounds(r["scope"], t_acc, detected, accept_ts, ctx, unchanged)
             # reconstruction check vs the logged replay fields (re-run and stored)
             logged = (int(a.n_replayed), int(a.replay_start), int(a.replay_end))
             mine = (len(R), R[0], R[-1])
