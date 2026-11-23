@@ -50,7 +50,7 @@ STORED = ROOT / "AAMAS 2027" / "results" / "rebuttal_fri"
 OUT = ROOT / "AAMAS 2027" / "results" / "rebuttal_replay_diag"
 CONDS = ("within_library_switch", "outside_library_switch_m2", "recurring")
 NICE = {"within_library_switch": "Within-library", "outside_library_switch_m2": "Outside m2",
-        "recurring": "Recurring"}
+        "recurring": "Recurring", "outside_library_switch_m1": "Outside m1", "stationary": "Stationary"}
 SCOPES = {"full": "HH-R", "him_window": "HH-R@him_window", "post_detection": "HH-R@post_detection"}
 CAPACITY = rm.WINDOW  # HHAgent: ReplayBuffer(maxlen=cascade.window), FIFO deque
 N_BOOT, BOOT_SEED = 10_000, 20261122
@@ -131,10 +131,16 @@ def fmt(m, lo, hi, d=3) -> str:
 
 # ---------------------------------------------------------------- main ----
 def main() -> None:
+    global OUT, CONDS
     ap = argparse.ArgumentParser()
     ap.add_argument("--seeds", type=int, default=20)
     ap.add_argument("--workers", type=int, default=4)
+    ap.add_argument("--conditions", nargs="+", default=list(CONDS))
+    ap.add_argument("--out", default=None, help="output dir relative to AAMAS 2027/results (default rebuttal_replay_diag)")
     args = ap.parse_args()
+    CONDS = tuple(args.conditions)
+    if args.out:
+        OUT = ROOT / "AAMAS 2027" / "results" / args.out
     OUT.mkdir(parents=True, exist_ok=True)
     seeds = list(range(args.seeds))
 
@@ -269,6 +275,9 @@ def main() -> None:
     post_sw = per[per.t_sw.notna()]
 
     def agg(df: pd.DataFrame, keys: list[str]) -> pd.DataFrame:
+        if df.empty:  # condition not in this run (e.g. --conditions without Within-library)
+            return pd.DataFrame(columns=[*dict.fromkeys([*keys, "op"]), "n_acceptances", "n_with_pre",
+                                         *[f"{c}{x}" for c in cols for x in ("", "_lo", "_hi", "_nseeds")]])
         out = []
         for k, g in df.groupby(keys, sort=False):
             k = k if isinstance(k, tuple) else (k,)
