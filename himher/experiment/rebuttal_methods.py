@@ -198,6 +198,13 @@ for _scope in ("context_filtered", "op_gated"):
                                                          context_delta=DELTA))
 F_METHODS = ("HH-R@context_filtered", "HH-R@op_gated")
 
+# Monday Task C: changepoint-aligned replay (same delta, agent's models only).
+for _scope in ("cp_joint", "cp_per_context"):
+    register(f"HH-R@{_scope}", "HH-R", _scope,
+             lambda seed, spec, sc=_scope: make_hh_agent(seed, replay=True, replay_scope=sc,
+                                                         context_delta=DELTA))
+C_METHODS = ("HH-R@cp_joint", "HH-R@cp_per_context")
+
 # Mapping to the method names used in the stored paper results.
 PAPER_NAME = {"HH-R": "hh_replay", "HH-A": "hh_ablation", "FB": "fixed_bayes",
               "OB": "oracle_bayes", "CB": "continuous_bayes"}

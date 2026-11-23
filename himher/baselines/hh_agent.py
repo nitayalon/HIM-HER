@@ -23,7 +23,9 @@ from himher.domains.handoff.env import Context, Hand
 from himher.domains.handoff.policy import TabularQPolicy, Transition
 
 
-REPLAY_SCOPES = ("full", "him_window", "post_detection", "context_filtered", "op_gated")
+REPLAY_SCOPES = ("full", "him_window", "post_detection", "context_filtered", "op_gated",
+                 "cp_joint", "cp_per_context")
+TASK_F_SCOPES = ("context_filtered", "op_gated", "cp_joint", "cp_per_context")
 EPS_SCHEDULES = ("constant", "decay_reset")
 
 
@@ -40,6 +42,65 @@ def select_context_filtered(times, transitions, first_detection: int, unchanged:
     unchanged contexts. Buffer order is kept."""
     return [(tt, tr) for tt, tr in zip(times, transitions)
             if tt >= first_detection or tr.context in unchanged]
+
+
+def best_split(rounds, ll_prev, ll_acc, w_end: int) -> tuple[int, float]:
+    """Task C: split s in {rounds[0], ..., w_end + 1} maximising
+    LL(s) = sum_{t < s} ll_prev(t) + sum_{t >= s} ll_acc(t) over the given
+    (time-ordered) interactions; ties -> the largest s. Returns
+    (s_hat, LL(s_hat) - LL(first round)). With no interactions, s_hat = w_end + 1."""
+    n = len(rounds)
+    if n == 0:
+        return w_end + 1, 0.0
+    pre = [0.0]
+    post = [0.0]
+    for a, b in zip(ll_prev, ll_acc):
+        pre.append(pre[-1] + a)
+        post.append(post[-1] + b)
+    total_acc = post[-1]
+    best_i, best = 0, pre[0] + (total_acc - post[0])
+    ll0 = best
+    for i in range(1, n + 1):  # split before element i (i = n: after the last)
+        v = pre[i] + (total_acc - post[i])
+        if v >= best:  # >= : ties go to the larger split
+            best_i, best = i, v
+    s_hat = rounds[best_i] if best_i < n else w_end + 1
+    return s_hat, best - ll0
+
+
+def select_changepoint(times, transitions, prev, accepted, delta: float, per_context: bool):
+    """Task C (cp_joint / cp_per_context): replay every window interaction in
+    contexts whose parameter moved by <= delta, and in changed contexts only
+    interactions at or after the estimated change point. Likelihoods are the
+    codebase's own BernoulliHandModel.log_prob; ground truth is never used.
+    Returns (selected [(t, transition)], changed contexts, s_hat dict, LL gain)."""
+    changed = tuple(c for c in (0, 1) if c not in unchanged_contexts(prev, accepted, delta))
+    times, transitions = list(times), list(transitions)
+    w_end = times[-1]
+    ll = [(t, tr, prev.log_prob(tr.context, tr.counterpart_action),
+           accepted.log_prob(tr.context, tr.counterpart_action)) for t, tr in zip(times, transitions)]
+    s_hat: dict[str, int] = {}
+    gain = 0.0
+    if per_context:
+        cut = {}
+        for c in changed:
+            sub = [x for x in ll if x[1].context == c]
+            cut[c], g = best_split([x[0] for x in sub], [x[2] for x in sub], [x[3] for x in sub], w_end)
+            s_hat[f"ctx{c}"] = cut[c]
+            gain += g
+        keep = lambda t, tr: tr.context not in changed or t >= cut[tr.context]  # noqa: E731
+    else:
+        # unchanged-context interactions contribute 0 to both sums, so the
+        # split over all window rounds equals the split over changed ones
+        # with ties resolved to the largest round.
+        rounds = [x[0] for x in ll]
+        lp = [x[2] if x[1].context in changed else 0.0 for x in ll]
+        la = [x[3] if x[1].context in changed else 0.0 for x in ll]
+        cut_all, gain = best_split(rounds, lp, la, w_end)
+        s_hat["joint"] = cut_all
+        keep = lambda t, tr: tr.context not in changed or t >= cut_all  # noqa: E731
+    selected = [(t, tr) for t, tr in zip(times, transitions) if keep(t, tr)]
+    return selected, changed, s_hat, gain
 
 
 def decay_reset_epsilon(t: int, t_reset: int, eps0: float, eps_min: float, half_life: float) -> float:
@@ -82,6 +143,12 @@ class HHAgent:
             the incumbent before this round's revision; agent's models only).
           - "op_gated" (Monday Task F): as "full", but nothing is replayed
             when the accepted operator is reuse (the buffer is kept).
+          - "cp_joint" / "cp_per_context" (Monday Task C): in contexts whose
+            parameter moved by more than ``context_delta``, replay only the
+            window interactions at or after a change point estimated by
+            maximum likelihood under (theta_prev before, theta_acc after);
+            one split for the whole window (joint) or one per changed
+            context. Unchanged contexts: the whole window.
 
         ``eps_schedule`` (rebuttal Task D):
           - "constant" (default): the policy's own fixed epsilon. Unchanged.
@@ -181,7 +248,7 @@ class HHAgent:
 
         if step_log.revised:
             if self._replay:
-                if self._replay_scope in ("context_filtered", "op_gated"):
+                if self._replay_scope in TASK_F_SCOPES:
                     self._replay_task_f(t, model_at_action_time, step_log)
                 elif self._replay_scope == "full":
                     n = len(self._buffer)
@@ -200,7 +267,7 @@ class HHAgent:
                         self._policy.update(tr, self._cascade.incumbent)
                     n = len(selected)
                     first = selected[0][0]
-                if self._replay_scope not in ("context_filtered", "op_gated"):
+                if self._replay_scope not in TASK_F_SCOPES:
                     self.last_replay = (t, n, first, t)
             else:
                 # Ablation (Section 5.2): discard the buffered,
@@ -215,7 +282,20 @@ class HHAgent:
 
     def _replay_task_f(self, t: int, prev_model, step_log: CascadeStepLog) -> None:
         accepted = self._cascade.incumbent
-        if self._replay_scope == "op_gated":
+        extra: dict = {}
+        if self._replay_scope in ("cp_joint", "cp_per_context"):
+            unchanged = ()
+            selected, changed, s_hat, gain = select_changepoint(
+                self._buffer_times, self._buffer, prev_model, accepted, self._context_delta,
+                per_context=self._replay_scope == "cp_per_context")
+            extra = {"changed_contexts": ";".join(map(str, changed)) if changed else "none",
+                     "ll_gain": gain}
+            if self._replay_scope == "cp_joint":
+                extra["s_hat"] = s_hat["joint"]
+            else:
+                for c in (0, 1):
+                    extra[f"s_hat_ctx{c}"] = s_hat.get(f"ctx{c}", -1)
+        elif self._replay_scope == "op_gated":
             unchanged: tuple[int, ...] = ()
             if step_log.regime == Regime.REUSE:
                 selected = []
@@ -232,5 +312,8 @@ class HHAgent:
         self.last_replay_detail = {
             "n_replayed_ctx0": sum(1 for _, tr in selected if tr.context == 0),
             "n_replayed_ctx1": sum(1 for _, tr in selected if tr.context == 1),
-            "unchanged_contexts": ";".join(map(str, unchanged)) if unchanged else "none",
         }
+        if extra:
+            self.last_replay_detail |= extra
+        else:
+            self.last_replay_detail["unchanged_contexts"] = ";".join(map(str, unchanged)) if unchanged else "none"
