@@ -12,6 +12,7 @@ Writes AAMAS 2027/reports/rebuttal_fri_tables/cumulative_by_condition.{md,csv}
 
 from __future__ import annotations
 
+import argparse
 import itertools
 import sys
 from pathlib import Path
@@ -26,7 +27,15 @@ from himher.experiment import instrumentation as inst  # noqa: E402
 
 RES = ROOT / "AAMAS 2027" / "results" / "rebuttal_fri"
 OUT = ROOT / "AAMAS 2027" / "reports" / "rebuttal_fri_tables"
-METHODS = ("BPR+", "HH-R", "HH-A")
+HH = ("HH-R", "HH-A")
+WBDB = ("WB-k20", "DB-0.90", "DB-0.95", "DB-0.98")
+# set -> (methods, stored experiments, comparisons, output stem, title)
+SETS = {
+    "bpr": (("BPR+", *HH), ("orig", "BPR_mdp"), list(itertools.combinations(("BPR+", *HH), 2)),
+            "cumulative_by_condition", "BPR+ vs HH-R vs HH-A"),
+    "wbdb": ((*HH, *WBDB), ("orig", "B_baselines"), [(h, b) for h in HH for b in WBDB],
+             "cumulative_wbdb_vs_hh", "WB / DB vs HH-R / HH-A"),
+}
 COND_ORDER = ("stationary", "within_library_switch", "outside_library_switch_m1",
               "outside_library_switch_m2", "recurring")
 NICE = {"stationary": "Stationary", "within_library_switch": "Within-library",
@@ -44,7 +53,10 @@ def holm(p: np.ndarray) -> np.ndarray:
 
 
 def main() -> None:
-    s = pd.concat([pd.read_csv(RES / e / "summary.csv") for e in ("orig", "BPR_mdp")])
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--set", choices=sorted(SETS), default="bpr")
+    METHODS, exps, pairs, stem, title = SETS[ap.parse_args().set]
+    s = pd.concat([pd.read_csv(RES / e / "summary.csv") for e in exps])
     s = s[(s.variant == "default") & s.method.isin(METHODS)].drop_duplicates(["method", "condition", "seed"])
     rows = []
     for _, r in s.iterrows():
@@ -59,11 +71,11 @@ def main() -> None:
         for ph, v in phases.items():
             rows.append({"method": r.method, "condition": r.condition, "seed": r.seed, "phase": ph, "cum": v})
     long = pd.DataFrame(rows)
-    long.to_csv(OUT / "cumulative_by_condition_per_seed.csv", index=False)
+    long.to_csv(OUT / f"{stem}_per_seed.csv", index=False)
 
     desc = (long.groupby(["condition", "phase", "method"]).cum
                 .agg(mean="mean", se=lambda x: x.std(ddof=1) / np.sqrt(len(x)), n="size").reset_index())
-    desc.to_csv(OUT / "cumulative_by_condition.csv", index=False)
+    desc.to_csv(OUT / f"{stem}.csv", index=False)
 
     tests = []
     for c in COND_ORDER:
@@ -73,7 +85,7 @@ def main() -> None:
             if ph == "before" and c in SHARED_PRE[1:]:
                 continue
             w = long[(long.condition == c) & (long.phase == ph)].pivot(index="seed", columns="method", values="cum")
-            for a, b in itertools.combinations(METHODS, 2):
+            for a, b in pairs:
                 d = w[a] - w[b]
                 t, p = stats.ttest_rel(w[a], w[b])
                 ci = stats.t.interval(0.95, len(d) - 1, loc=d.mean(), scale=d.std(ddof=1) / np.sqrt(len(d)))
@@ -83,9 +95,9 @@ def main() -> None:
     tests = pd.DataFrame(tests)
     tests["p_holm"] = holm(tests.p_raw.to_numpy())
     tests["significant"] = tests.p_holm < 0.05
-    tests.to_csv(OUT / "cumulative_by_condition_tests.csv", index=False)
+    tests.to_csv(OUT / f"{stem}_tests.csv", index=False)
 
-    L = ["# Cumulative reward by condition: BPR+ vs HH-R vs HH-A", "",
+    L = [f"# Cumulative reward by condition: {title}", "",
          "200 seeds, identical environment draws per seed. Cumulative = sum of rewards in the phase; "
          "total = before + after (= AUC). Mean ± SE over seeds. Before = rounds before the first switch "
          "(150; Recurring 75); after = the rest. Stationary has no switch (total only, 300 rounds).", "",
@@ -105,8 +117,8 @@ def main() -> None:
         L.append(f"| {NICE[r.condition]} | {r.phase} | {r.comparison.replace(' - ', ' − ')} | {r['diff']:+.1f} "
                  f"[{r.ci_lo:+.1f}, {r.ci_hi:+.1f}] | {r.t:.2f} | {r.dz:+.2f} | "
                  f"{r.p_holm:.2g}{' *' if r.significant else ''} |")
-    (OUT / "cumulative_by_condition.md").write_text("\n".join(L) + "\n", encoding="utf-8")
-    print("wrote AAMAS 2027/reports/rebuttal_fri_tables/cumulative_by_condition.md")
+    (OUT / f"{stem}.md").write_text("\n".join(L) + "\n", encoding="utf-8")
+    print(f"wrote AAMAS 2027/reports/rebuttal_fri_tables/{stem}.md")
 
 
 if __name__ == "__main__":
