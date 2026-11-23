@@ -52,13 +52,17 @@ class HIMVerifier:
     (Section 4.6). ``contexts`` is the representative set of contexts used
     to compute the distinctness divergence d(m, m') (Definition 4.1's
     "divergence between the predictive policies").
+
+    ``contexts=None`` measures distinctness over the distinct contexts in
+    the window instead of a fixed set -- for domains whose context space is
+    too large to enumerate (Predator-Prey: 2,401 positions).
     """
 
-    def __init__(self, tau: float, delta: float, contexts: Sequence[Context]) -> None:
+    def __init__(self, tau: float, delta: float, contexts: Sequence[Context] | None) -> None:
         self._tau = tau
         self._delta = delta
-        self._contexts = tuple(contexts)
-        if not self._contexts:
+        self._contexts = None if contexts is None else tuple(contexts)
+        if self._contexts is not None and not self._contexts:
             raise ValueError("contexts must be non-empty")
 
     def evaluate(
@@ -80,9 +84,12 @@ class HIMVerifier:
         candidate_score = score(candidate, window)
 
         improvements = [candidate_score - score(m, window) for m in comparison_set]
-        distinctnesses = [
-            model_divergence(candidate, m, self._contexts) for m in comparison_set
-        ]
+        contexts = (
+            self._contexts
+            if self._contexts is not None
+            else tuple(dict.fromkeys(context for context, _ in window))
+        )
+        distinctnesses = [model_divergence(candidate, m, contexts) for m in comparison_set]
 
         min_improvement = min(improvements)
         min_distinctness = min(distinctnesses)

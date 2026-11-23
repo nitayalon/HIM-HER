@@ -55,6 +55,7 @@ class HHCascade:
         calibrator: Calibrator | None = None,
         best_of: bool = False,
         min_revision_fill: int = 0,
+        merge_includes_incumbent: bool = False,
     ) -> None:
         self.incumbent = incumbent
         self.library = library
@@ -68,6 +69,7 @@ class HHCascade:
         self._calibrator = calibrator or NoOpCalibrator()
         self._best_of = best_of
         self._min_revision_fill = min_revision_fill
+        self._merge_includes_incumbent = merge_includes_incumbent
         # Failed candidates are logged for inspection (Section 4.4: "rejected
         # candidates... providing mistakes for the agent to learn from") but
         # never enter the library -- lib_t holds only previously-selected
@@ -103,6 +105,7 @@ class HHCascade:
         outcome = select_regime(
             self.incumbent, self.library, window, self._verifier, self._revise, self._construct,
             best_of=self._best_of,
+            merge_includes_incumbent=self._merge_includes_incumbent,
         )
 
         for attempt in outcome.attempts:

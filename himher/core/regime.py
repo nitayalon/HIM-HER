@@ -8,6 +8,13 @@ the full comparison pool {incumbent} u lib_t (lib_t here contains only
 previously-selected models -- see HHCascade and himher.core.him's
 module docstring for why that matters).
 
+``merge_includes_incumbent`` widens the pool the Revise (Merge) regime
+blends over from lib_t to lib_t u {incumbent}. lib_t only receives a model
+once it is displaced, so without this a freshly constructed incumbent can
+never be a Merge parent (needed by the Predator-Prey merge condition, where
+the constructed Evade model is the incumbent when Cautious-B appears). Off
+by default so the handoff results are unchanged.
+
 ``best_of`` is a variant to the cost-ordered rule: Reuse and Revise are
 both evaluated, and the accepted candidate with the larger improvement over
 the incumbent wins; Construct is tried only if neither is accepted.
@@ -17,7 +24,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Callable, Sequence
+from typing import Callable, Iterable, Sequence
 
 from himher.core.him import HIMResult, HIMVerifier
 from himher.core.library import ModelLibrary
@@ -31,7 +38,7 @@ class Regime(Enum):
 
 
 Constructor = Callable[[Sequence[tuple[Context, Action]]], CounterpartModel]
-Reviser = Callable[[ModelLibrary, Sequence[tuple[Context, Action]]], CounterpartModel | None]
+Reviser = Callable[[Iterable[CounterpartModel], Sequence[tuple[Context, Action]]], CounterpartModel | None]
 
 
 @dataclass(frozen=True)
@@ -56,6 +63,7 @@ def select_regime(
     revise: Reviser,
     construct: Constructor,
     best_of: bool = False,
+    merge_includes_incumbent: bool = False,
 ) -> RegimeOutcome:
     attempts: list[Attempt] = []
 
@@ -71,7 +79,10 @@ def select_regime(
         if reuse_result.accepted and not best_of:
             return RegimeOutcome(Regime.REUSE, reuse_candidate, tuple(attempts))
 
-    revised_candidate = revise(library, window)
+    merge_pool = (
+        tuple(dict.fromkeys((*library, incumbent))) if merge_includes_incumbent else library
+    )
+    revised_candidate = revise(merge_pool, window)
     revise_attempt = None
     if revised_candidate is not None and revised_candidate != incumbent:
         revise_result = verifier.evaluate(revised_candidate, incumbent, comparison_pool(revised_candidate), window)

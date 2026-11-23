@@ -18,6 +18,8 @@ from typing import Protocol, Sequence
 
 import numpy as np
 
+from himher.core.schedule import SwitchSchedule  # re-exported for existing imports
+
 
 class Hand(IntEnum):
     L = 0
@@ -39,38 +41,6 @@ class StepResult:
     ego_action: Hand
     counterpart_action: Hand
     reward: float
-
-
-@dataclass
-class SwitchSchedule:
-    """Maps a round number to the counterpart policy in effect.
-
-    ``segments`` is a non-empty sequence of ``(start_round, policy)`` pairs,
-    sorted by ``start_round``, with the first segment starting at round 0.
-    The policy in effect at round t is the policy of the last segment whose
-    start_round <= t. A single-segment schedule gives a stationary
-    counterpart (Section 5.3); multiple segments give the known-switch,
-    unknown-switch, and recurring conditions.
-    """
-
-    segments: Sequence[tuple[int, CounterpartPolicy]]
-
-    def __post_init__(self) -> None:
-        if not self.segments:
-            raise ValueError("segments must be non-empty")
-        if self.segments[0][0] != 0:
-            raise ValueError("the first segment must start at round 0")
-        starts = [start for start, _ in self.segments]
-        if starts != sorted(starts):
-            raise ValueError("segments must be sorted by start_round")
-
-    def policy_at(self, t: int) -> CounterpartPolicy:
-        active = self.segments[0][1]
-        for start, policy in self.segments:
-            if start > t:
-                break
-            active = policy
-        return active
 
 
 class SwitchingHandoffGame:
